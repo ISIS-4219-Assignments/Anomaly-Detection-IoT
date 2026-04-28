@@ -1,6 +1,6 @@
 # Import classes from our local modules
-from server import CentralServer
 from device import SimulatedDevice
+from server import CentralServer
 
 def main():
 

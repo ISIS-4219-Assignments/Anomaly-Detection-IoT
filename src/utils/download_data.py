@@ -7,10 +7,6 @@ into the project's data/ directory.
 Usage (run from any directory):
     python src/utils/download_data.py
 
-Requires the KAGGLE_USERNAME and KAGGLE_KEY environment variables (or a
-~/.kaggle/kaggle.json credentials file) to be present so kagglehub can
-authenticate.
-
 After a successful run the project data layout will be:
     data/
         attack_traffic/   <- CSV files for 14 attack categories

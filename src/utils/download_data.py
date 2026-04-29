@@ -36,6 +36,7 @@ DATASET_SLUG = "mohamedamineferrag/edgeiiotset-cyber-security-dataset-of-iot-iio
 
 
 def delete_pcap(root: str) -> int:
+
     """
     Recursively delete every .pcap file under *root*.
 
@@ -49,6 +50,7 @@ def delete_pcap(root: str) -> int:
     Returns:
         Number of .pcap files deleted.
     """
+
     count = 0
 
     for dirpath, _, filenames in os.walk(root):
@@ -57,10 +59,12 @@ def delete_pcap(root: str) -> int:
 
                 os.remove(os.path.join(dirpath, fname))
                 count += 1
+
     return count
 
 
 def find_parent_of_file(root: str, target: str) -> str | None:
+    
     """
     Walk *root* and return the first directory that directly contains *target*.
 
@@ -74,6 +78,7 @@ def find_parent_of_file(root: str, target: str) -> str | None:
     Returns:
         Absolute path of the directory containing *target*, or None if not found.
     """
+
     for dirpath, _, filenames in os.walk(root):
         if target in filenames:
             
@@ -82,6 +87,7 @@ def find_parent_of_file(root: str, target: str) -> str | None:
 
 
 def print_tree(root: str, indent: int = 0, max_depth: int = 3) -> None:
+    
     """
     Print an indented directory tree rooted at *root* up to *max_depth* levels.
 
@@ -93,9 +99,11 @@ def print_tree(root: str, indent: int = 0, max_depth: int = 3) -> None:
         indent:    Current indentation level (used in recursive calls).
         max_depth: Maximum number of levels to descend before stopping.
     """
+
     if indent > max_depth:
         return
     prefix = "  " * indent
+
     try:
         entries = sorted(os.listdir(root))
     except PermissionError:
@@ -109,6 +117,7 @@ def print_tree(root: str, indent: int = 0, max_depth: int = 3) -> None:
 
 
 def main() -> None:
+
     """
     Orchestrate the full dataset download-and-organise pipeline.
 
@@ -123,6 +132,7 @@ def main() -> None:
 
     Exits with code 1 if either source folder cannot be found in the download.
     """
+    
     print(f"Downloading dataset: {DATASET_SLUG} ...\n")
     dl_path = kagglehub.dataset_download(DATASET_SLUG)
     print(f"Cached at: {dl_path}\n")

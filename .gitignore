@@ -174,4 +174,7 @@ pyrightconfig.json
 data/attack_traffic/
 data/normal_traffic/
 
+# Claude init file
+CLAUDE.md
+
 # End of https://www.toptal.com/developers/gitignore/api/python

@@ -19,13 +19,16 @@ and all attacks are covered.
 
 Test set layout per device (example with 2 assigned attacks)
 -------------------------------------------------------------
-    [TEST_NORMAL_SEGMENT normal rows]
-    + [all rows from attack_1 CSV]
-    + [TEST_NORMAL_SEGMENT normal rows]
-    + [all rows from attack_2 CSV]
+    [normal_seg_1]
+    + [attack_1 rows sampled to budget]
+    + [normal_seg_2]
+    + [attack_2 rows sampled to budget]
+    + [normal_seg_3]
 
-Normal segments are drawn sequentially from the device's normal-test slice.
-Test set size varies per device depending on how many attacks it receives.
+The full 15 % normal-test slice is split evenly into (n_attacks + 1) segments
+so that every attack is bracketed by normal traffic on both sides.
+Total attack rows across all assigned attacks are capped at ATTACK_FACTOR *
+loaded_rows; each attack's share is proportional to its original size.
 
 Output
 ------
@@ -39,14 +42,17 @@ Usage:
 import pandas as pd
 import os
 
+
 TRAIN_RATIO         = 0.70
 VAL_RATIO           = 0.15
-MAX_NORMAL_ROWS     = 500_000  # cap per device to keep memory usage bounded
-TEST_NORMAL_SEGMENT = 5_000    # normal rows inserted before each attack chunk
+CAP_FACTOR    = 0.2   # load only 20% of each device's rows
+ATTACK_FACTOR = 0.1   # attack rows in test capped at 10% of loaded normal rows
 
 NORMAL_DIR = os.path.join("data", "normal_traffic")
 ATTACK_DIR = os.path.join("data", "attack_traffic")
 SPLITS_DIR = os.path.join("data", "splits")
+
+EXCLUDED_DEVICES = {"Heart_Rate", "Modbus"}
 
 
 def load_csv(path: str) -> pd.DataFrame:
@@ -65,7 +71,7 @@ def load_csv(path: str) -> pd.DataFrame:
         Raw contents of the file with all columns retained.
     """
 
-    return pd.read_csv(path, low_memory=False)
+    return pd.read_csv(path, low_memory = False)
 
 
 def split_device(df: pd.DataFrame):
@@ -148,17 +154,16 @@ def assign_attacks(attack_names: list, devices: list) -> dict:
     return assignment
 
 
-def build_test_set(normal_test_df: pd.DataFrame, attack_chunks: list) -> pd.DataFrame:
+def build_test_set(normal_test_df: pd.DataFrame, attack_chunks: list, attack_budget: int) -> pd.DataFrame:
 
     """
-    Construct a test set by interleaving normal segments with attack chunks.
+    Construct a test set by interleaving normal segments with sampled attack chunks.
 
-    The pattern is:
-        normal_seg | attack_1 | normal_seg | attack_2 | ...
+    Pattern: normal_seg_1 | attack_1 | normal_seg_2 | attack_2 | ... | normal_seg_n+1
 
-    Each normal segment is drawn sequentially from ``normal_test_df`` so that
-    no normal row is repeated.  If the pool of normal rows is exhausted before
-    all attack chunks are processed, subsequent normal segments are omitted.
+    All normal-test rows are used, split evenly into (n_attacks + 1) segments so
+    every attack is bracketed by normal traffic on both sides.  Attack chunks are
+    down-sampled proportionally if their combined row count exceeds attack_budget.
 
     Parameters
     ----------
@@ -166,6 +171,8 @@ def build_test_set(normal_test_df: pd.DataFrame, attack_chunks: list) -> pd.Data
         Normal-traffic rows reserved for the test split of a given device.
     attack_chunks : list[pd.DataFrame]
         Ordered list of attack DataFrames assigned to this device.
+    attack_budget : int
+        Maximum total attack rows allowed (ATTACK_FACTOR * loaded normal rows).
 
     Returns
     -------
@@ -173,24 +180,32 @@ def build_test_set(normal_test_df: pd.DataFrame, attack_chunks: list) -> pd.Data
         Concatenated test set with a fresh integer index.
     """
 
-    # If no attacks were assigned, return the normal slice as-is
     if not attack_chunks:
-        return normal_test_df.reset_index(drop=True)
+        return normal_test_df.reset_index(drop = True)
 
-    pool   = normal_test_df.reset_index(drop=True)
-    n_pool = len(pool)
-    pieces = []
-    offset = 0  # tracks how far into the normal pool we have consumed
+    # Down-sample each attack proportionally so combined rows <= attack_budget
+    total_attack_rows = sum(len(c) for c in attack_chunks)
+    if total_attack_rows > attack_budget:
+        scale   = attack_budget / total_attack_rows
+        sampled = [c.iloc[:max(1, int(len(c) * scale))] for c in attack_chunks]
+    else:
+        sampled = attack_chunks
 
-    for chunk in attack_chunks:
-        end = min(offset + TEST_NORMAL_SEGMENT, n_pool)
-        # Only append a normal segment while the pool still has rows left
-        if offset < n_pool:
-            pieces.append(pool.iloc[offset:end])
+    # Split normal pool evenly into (n_attacks + 1) segments
+    pool     = normal_test_df.reset_index(drop = True)
+    n        = len(sampled)
+    seg_size = len(pool) // (n + 1)
+    pieces   = []
+    offset   = 0
+
+    for chunk in sampled:
+        pieces.append(pool.iloc[offset : offset + seg_size])
         pieces.append(chunk)
-        offset += TEST_NORMAL_SEGMENT
+        offset += seg_size
 
-    return pd.concat(pieces, ignore_index=True)
+    pieces.append(pool.iloc[offset:])  # trailing normal segment
+
+    return pd.concat(pieces, ignore_index = True)
 
 
 def main():
@@ -216,16 +231,16 @@ def main():
                 f"Directory not found: {d!r}\nRun this script from the repository root."
             )
 
-    print("Loading attack traffic …", end=" ", flush=True)
+    print("Loading attack traffic …", end = " ", flush = True)
     attack_chunks = load_attack_chunks()
     attack_names  = list(attack_chunks.keys())
     total_attack  = sum(len(v) for v in attack_chunks.values())
     print(f"{total_attack:,} rows across {len(attack_chunks)} files.\n")
 
-    # Collect device names from sub-directories only (skip loose files)
+    # Collect device names from sub-directories only (skip loose files and excluded devices)
     devices = sorted(
         d for d in os.listdir(NORMAL_DIR)
-        if os.path.isdir(os.path.join(NORMAL_DIR, d))
+        if os.path.isdir(os.path.join(NORMAL_DIR, d)) and d not in EXCLUDED_DEVICES
     )
     print(f"Found {len(devices)} device(s): {', '.join(devices)}\n")
 
@@ -240,29 +255,30 @@ def main():
             print(f"[SKIP] {device}: expected CSV not found at {csv_path}")
             continue
 
-        print(f"[{device}] Loading …", end=" ", flush=True)
+        print(f"[{device}] Loading …", end = " ", flush = True)
+
         df = load_csv(csv_path)
-        if len(df) > MAX_NORMAL_ROWS:
-            # Truncate from the front to keep the earliest captures for training
-            df = df.iloc[:MAX_NORMAL_ROWS]
-            print(f"{MAX_NORMAL_ROWS:,} rows (capped at MAX_NORMAL_ROWS).")
-        else:
-            print(f"{len(df):,} rows.")
+        print(f"Rows identified (100%): {len(df)} ")
+
+        cap_limit = int(len(df) * CAP_FACTOR)
+        df = df.iloc[:cap_limit]
+        print(f"Rows loaded (20%): {len(df)}")
 
         train, val, normal_test = split_device(df)
 
-        assigned = assignment[device]
-        chunks   = [attack_chunks[a] for a in assigned]
-        test     = build_test_set(normal_test, chunks)
+        assigned      = assignment[device]
+        chunks        = [attack_chunks[a] for a in assigned]
+        attack_budget = int(len(df) * ATTACK_FACTOR)
+        test          = build_test_set(normal_test, chunks, attack_budget)
 
         out_dir = os.path.join(SPLITS_DIR, device)
-        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(out_dir, exist_ok = True)
 
-        train.to_csv(os.path.join(out_dir, "train.csv"), index=False)
-        val.to_csv(  os.path.join(out_dir, "val.csv"),   index=False)
-        test.to_csv( os.path.join(out_dir, "test.csv"),  index=False)
+        train.to_csv(os.path.join(out_dir, "train.csv"), index = False)
+        val.to_csv(  os.path.join(out_dir, "val.csv"),   index = False)
+        test.to_csv( os.path.join(out_dir, "test.csv"),  index = False)
 
-        n_attack     = sum(len(c) for c in chunks)
+        n_attack     = len(test) - len(normal_test)
         attack_label = ", ".join(assigned) if assigned else "—"
         print(f"         → train={len(train):,}  val={len(val):,}  "
               f"test={len(test):,} (normal={len(normal_test):,} + attack={n_attack:,})\n"
@@ -281,7 +297,7 @@ def main():
 
     col = 104
     print("=" * col)
-    print(f"{'Device':<30} {'Train':>8} {'Val':>7} {'Test(N)':>9} {'Test(A)':>9} {'Test':>7}  Attacks")
+    print(f"{'Device':<30} {'Train':>8} {'Val':>7} {'Test(Normal)':>9} {'Test(Attack)':>9} {'Test(Total)':>7}  Attacks")
     print("-" * col)
     for r in summary_rows:
         print(f"{r['device']:<30} {r['train']:>8,} {r['val']:>7,} "

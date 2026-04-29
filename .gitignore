@@ -173,6 +173,7 @@ pyrightconfig.json
 # Data files
 data/attack_traffic/
 data/normal_traffic/
+data/splits/*
 
 # Claude init file
 CLAUDE.md

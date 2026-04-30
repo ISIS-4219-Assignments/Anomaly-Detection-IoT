@@ -113,8 +113,8 @@ def _compute_input_dim(train_path: str, known_categories: dict) -> int:
         Number of feature columns after cleaning, encoding, and scaling.
     """
 
-    pre = IoTPreprocessor(known_categories=known_categories)
-    X, _ = pre.fit_transform(pd.read_csv(train_path, low_memory=False))
+    pre = IoTPreprocessor(known_categories = known_categories)
+    X, _ = pre.fit_transform(pd.read_csv(train_path, low_memory = False))
     return X.shape[1]
 
 

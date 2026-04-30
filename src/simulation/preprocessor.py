@@ -54,13 +54,14 @@ information in a real deployment.  Any column listed here that is absent from
 a given CSV is silently skipped.
 """
 
+
 DROP_COLS = [
     "frame.time", "ip.src_host", "ip.dst_host",
     "arp.src.proto_ipv4", "arp.dst.proto_ipv4",
     "http.file_data", "http.request.full_uri", "icmp.transmit_timestamp",
     "http.request.uri.query", "tcp.options", "tcp.payload",
     "tcp.srcport", "tcp.dstport", "udp.port", "mqtt.msg",
-    "tcp.checksum",  # CRC checksum — random-looking, no anomaly signal
+    "tcp.checksum"
 ]
 
 
@@ -72,6 +73,7 @@ These are protocol flag/bitmask fields whose integer values carry real signal
 because that function does not recognise the '0x' prefix.
 """
 
+
 HEX_COLS = ["tcp.flags", "mqtt.conflags", "mqtt.hdrflags"]
 
 
@@ -82,6 +84,7 @@ HEX_COLS = ["tcp.flags", "mqtt.conflags", "mqtt.hdrflags"]
 category (e.g. ``DDoS_HTTP_Flood``, ``SQL_injection``).
 """
 
+
 TARGET_COLS = ["Attack_label", "Attack_type"]
 
 
@@ -91,6 +94,7 @@ Encoded column names follow the pattern ``<original_col>-<category>`` to
 match the convention used in the dataset's original preprocessing guide.
 Columns absent from a particular device's CSV are silently skipped.
 """
+
 
 CATEGORICAL_COLS = [
     "http.request.method",
@@ -130,7 +134,7 @@ def build_global_categories(train_paths: list[str]) -> dict[str, list]:
     
     categories: dict[str, set] = {col: set() for col in CATEGORICAL_COLS}
     for path in train_paths:
-        df = pd.read_csv(path, usecols=lambda c: c in CATEGORICAL_COLS)
+        df = pd.read_csv(path, usecols = lambda c: c in CATEGORICAL_COLS)
         for col in CATEGORICAL_COLS:
             if col in df.columns:
                 categories[col].update(df[col].dropna().unique())
@@ -138,6 +142,7 @@ def build_global_categories(train_paths: list[str]) -> dict[str, list]:
 
 
 def _parse_hex_value(v):
+
     """Convert a single value from a HEX_COLS column to a numeric type.
 
     Handles three formats found across train/val/test splits:
@@ -149,6 +154,7 @@ def _parse_hex_value(v):
     Non-parseable strings become ``float('nan')`` and are later removed by
     the ``dropna`` step in :meth:`IoTPreprocessor._clean`.
     """
+
     if not isinstance(v, str):
         return v
     try:
@@ -213,9 +219,11 @@ class IoTPreprocessor:
         self.feature_columns: list[str] | None = None
         self.known_categories = known_categories
 
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
 
     def fit_transform(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
@@ -246,10 +254,11 @@ class IoTPreprocessor:
         self.feature_columns = X.columns.tolist()
         X_scaled = pd.DataFrame(
             self.scaler.fit_transform(X),
-            columns=self.feature_columns,
-            index=X.index,
+            columns = self.feature_columns,
+            index = X.index,
         )
         return X_scaled, y
+
 
     def transform(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
@@ -286,17 +295,19 @@ class IoTPreprocessor:
         df = self._encode(df)
         X, y = self._split_xy(df)
         # Align to training schema: add missing columns as 0, drop extras
-        X = X.reindex(columns=self.feature_columns, fill_value=0)
+        X = X.reindex(columns = self.feature_columns, fill_value = 0)
         X_scaled = pd.DataFrame(
             self.scaler.transform(X),
-            columns=self.feature_columns,
-            index=X.index,
+            columns = self.feature_columns,
+            index = X.index,
         )
         return X_scaled, y
+
 
     # ------------------------------------------------------------------
     # Internal steps
     # ------------------------------------------------------------------
+
 
     def _clean(self, df: pd.DataFrame) -> pd.DataFrame:
 
@@ -314,7 +325,7 @@ class IoTPreprocessor:
         """
 
         existing = [c for c in DROP_COLS if c in df.columns]
-        df = df.drop(columns=existing)
+        df = df.drop(columns = existing)
 
         # Parse hex-string flag columns (e.g. '0x00000010') to integers.
         # pd.to_numeric does not recognise the '0x' prefix, so these columns
@@ -327,11 +338,11 @@ class IoTPreprocessor:
         # non-parseable residual values into NaN for the dropna step.
         skip = set(TARGET_COLS) | set(CATEGORICAL_COLS)
         numeric_cols = [c for c in df.columns if c not in skip]
-        df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+        df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors = "coerce")
 
         df = df.dropna()
         df = df.drop_duplicates()
-        return df.reset_index(drop=True)
+        return df.reset_index(drop = True)
 
 
     def _encode(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -369,19 +380,19 @@ class IoTPreprocessor:
 
         for col in CATEGORICAL_COLS:
             if col in df.columns:
-                dummies = pd.get_dummies(df[col], prefix=col, prefix_sep="-")
-                df = df.drop(columns=[col])
+                dummies = pd.get_dummies(df[col], prefix = col, prefix_sep = "-")
+                df = df.drop(columns = [col])
             else:
                 # Column absent from this device; start with an empty frame
                 # so the reindex below can still add the expected zero columns.
-                dummies = pd.DataFrame(index=df.index)
+                dummies = pd.DataFrame(index = df.index)
 
             if self.known_categories and col in self.known_categories:
                 expected = [f"{col}-{cat}" for cat in self.known_categories[col]]
-                dummies = dummies.reindex(columns=expected, fill_value=0)
+                dummies = dummies.reindex(columns = expected, fill_value = 0)
 
             if not dummies.empty:
-                df = pd.concat([df, dummies], axis=1)
+                df = pd.concat([df, dummies], axis = 1)
 
         return df
 
@@ -405,5 +416,5 @@ class IoTPreprocessor:
 
         target_present = [c for c in TARGET_COLS if c in df.columns]
         y = df[target_present]
-        X = df.drop(columns=target_present)
+        X = df.drop(columns = target_present)
         return X, y

@@ -17,13 +17,13 @@ All inter-device communication goes through :class:`~server.CentralServer`.
 """
 
 
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix
 from preprocessor import IoTPreprocessor
 from models.factory import build_model
 from windowing import create_windows
 import pandas as pd
 import numpy as np
 import threading
-from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix
 
 
 class SimulatedDevice(threading.Thread):
@@ -108,6 +108,7 @@ class SimulatedDevice(threading.Thread):
         self.known_categories = known_categories
         self.local_epochs = local_epochs
 
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -131,10 +132,10 @@ class SimulatedDevice(threading.Thread):
             Prepared validation array (same shape convention as X_train).
         """
 
-        pre = IoTPreprocessor(known_categories=self.known_categories)
+        pre = IoTPreprocessor(known_categories = self.known_categories)
 
-        train_df = pd.read_csv(self.data_paths["train"], low_memory=False)
-        val_df = pd.read_csv(self.data_paths["val"], low_memory=False)
+        train_df = pd.read_csv(self.data_paths["train"], low_memory = False)
+        val_df = pd.read_csv(self.data_paths["val"], low_memory = False)
 
         X_train, _ = pre.fit_transform(train_df)
         X_val, _ = pre.transform(val_df)
@@ -150,6 +151,7 @@ class SimulatedDevice(threading.Thread):
             X_val = create_windows(X_val, self.window_size)
 
         return X_train, X_val
+
 
     # ------------------------------------------------------------------
     # Thread entry point
@@ -192,10 +194,10 @@ class SimulatedDevice(threading.Thread):
             history = model.fit(
                 X_train,
                 X_train,
-                validation_data=(X_val, X_val),
-                epochs=self.local_epochs,
-                batch_size=64,
-                verbose=0,
+                validation_data = (X_val, X_val),
+                epochs = self.local_epochs,
+                batch_size = 64,
+                verbose = 0,
             )
 
             train_loss = history.history["loss"][-1]
@@ -215,10 +217,10 @@ class SimulatedDevice(threading.Thread):
         final_model = build_model(self.model_type, self.input_dim, self.window_size)
         final_model.set_weights(self.server.global_model)
 
-        X_val_pred = final_model.predict(X_val, batch_size=256, verbose=0)
+        X_val_pred = final_model.predict(X_val, batch_size = 256, verbose = 0)
 
         axes = tuple(range(1, X_val.ndim))
-        val_errors = np.mean((X_val - X_val_pred) ** 2, axis=axes)
+        val_errors = np.mean((X_val - X_val_pred) ** 2, axis = axes)
 
         threshold = float(np.percentile(val_errors, 99))
 
@@ -229,7 +231,9 @@ class SimulatedDevice(threading.Thread):
         # ---- Evaluation phase (runs after all training rounds complete) ----
         self.evaluate(self.server.global_model, threshold)
 
+
     def evaluate(self, global_weights: list[np.ndarray], threshold: float) -> None:
+
         """Evaluate the global model on this device's test split.
 
         Loads the test CSV, applies the fitted scaler from training (no
@@ -254,10 +258,11 @@ class SimulatedDevice(threading.Thread):
             Final global model weights from the server, in Keras
             ``get_weights()`` format.
         """
+
         print(f"[Device {self.client_id}] Running test evaluation...")
 
         # Reuse the scaler fitted during training — never refit on test data
-        test_df = pd.read_csv(self.data_paths["test"], low_memory=False)
+        test_df = pd.read_csv(self.data_paths["test"], low_memory = False)
         X_test, y_test = self._preprocessor.transform(test_df)
 
         X_test = X_test.values.astype("float32")
@@ -272,11 +277,11 @@ class SimulatedDevice(threading.Thread):
         model = build_model(self.model_type, self.input_dim, self.window_size)
         model.set_weights(global_weights)
 
-        X_pred = model.predict(X_test, batch_size=256, verbose=0)
+        X_pred = model.predict(X_test, batch_size = 256, verbose = 0)
 
         # Per-sample reconstruction error (MSE averaged over all non-batch dims)
         axes = tuple(range(1, X_test.ndim))  # (1,) for vanilla; (1, 2) for sequence
-        errors = np.mean((X_test - X_pred) ** 2, axis=axes)
+        errors = np.mean((X_test - X_pred) ** 2, axis = axes)
         
         y_pred = (errors > threshold).astype(int)
 
@@ -285,9 +290,9 @@ class SimulatedDevice(threading.Thread):
 
         normal_mse = float(np.mean(errors[normal_mask])) if normal_mask.any() else float("nan")
         attack_mse = float(np.mean(errors[attack_mask])) if attack_mask.any() else float("nan")
-        precision = precision_score(y_test, y_pred, zero_division=0)
-        recall = recall_score(y_test, y_pred, zero_division=0)
-        f1 = f1_score(y_test, y_pred, zero_division=0)
+        precision = precision_score(y_test, y_pred, zero_division = 0)
+        recall = recall_score(y_test, y_pred, zero_division = 0)
+        f1 = f1_score(y_test, y_pred, zero_division = 0)
         cm = confusion_matrix(y_test, y_pred)
 
         if normal_mask.any() and attack_mask.any():

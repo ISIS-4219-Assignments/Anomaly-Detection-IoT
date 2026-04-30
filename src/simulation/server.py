@@ -27,6 +27,7 @@ race-condition-free by construction.
 from models.factory import build_model
 import numpy as np
 import threading
+import os
 
 
 class CentralServer:
@@ -107,8 +108,9 @@ class CentralServer:
         # When the last thread arrives the barrier fires aggregate_and_update
         # before releasing all threads, so no device ever sees a partial update.
         self.sync_barrier = threading.Barrier(
-            self.total_clients, action=self.aggregate_and_update
+            self.total_clients, action = self.aggregate_and_update
         )
+
 
     # ------------------------------------------------------------------
     # Public API
@@ -145,6 +147,7 @@ class CentralServer:
         # Block until all clients reach this point; last one aggregates
         self.sync_barrier.wait()
 
+
     # ------------------------------------------------------------------
     # Internal – called automatically by the barrier
     # ------------------------------------------------------------------
@@ -167,7 +170,7 @@ class CentralServer:
 
         # FedAvg: layer-wise mean across all client weight lists
         self.global_model = [
-            np.mean([client_weights[i] for client_weights in self.updates], axis=0)
+            np.mean([client_weights[i] for client_weights in self.updates], axis = 0)
             for i in range(len(self.global_model))
         ]
 
@@ -179,11 +182,14 @@ class CentralServer:
         if self.current_round > self.rounds_to_simulate:
             print("[Server] Federated Learning simulation completed.")
 
+
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
+
     def save_global_model(self, save_dir: str) -> str:
+
         """Build a Keras model, load the current global weights, and save it.
 
         The file is saved in Keras's native ``.keras`` format under
@@ -200,12 +206,11 @@ class CentralServer:
         str
             Absolute path of the saved model file.
         """
-        import os
 
         model = build_model(self.model_type, self.input_dim, self.window_size)
         model.set_weights(self.global_model)
 
-        os.makedirs(save_dir, exist_ok=True)
+        os.makedirs(save_dir, exist_ok = True)
         path = os.path.join(save_dir, f"{self.model_type}_autoencoder_final.keras")
         model.save(path)
         print(f"[Server] Global model saved → {path}")

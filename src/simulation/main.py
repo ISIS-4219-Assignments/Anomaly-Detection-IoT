@@ -1,51 +1,179 @@
-# Import classes from our local modules
+"""
+main.py
+-------
+Entry point for the Federated Learning simulation.
+
+Swapping between model architectures
+-------------------------------------
+Change the two constants below and rerun.  Nothing else needs to change.
+
+    MODEL_TYPE  = "vanilla"   →  Dense autoencoder,   flat input
+    MODEL_TYPE  = "lstm"      →  LSTM autoencoder,     sequence input
+    MODEL_TYPE  = "conv1d"    →  Conv1D autoencoder,   sequence input
+
+    WINDOW_SIZE = None        →  required for "vanilla"
+    WINDOW_SIZE = 30          →  required for "lstm" and "conv1d"
+
+Run from this directory
+-----------------------
+    cd src/simulation
+    python main.py
+"""
+
+
+from preprocessor import IoTPreprocessor, build_global_categories
 from device import SimulatedDevice
 from server import CentralServer
+import pandas as pd
+import os
 
-def main():
 
+# ---------------------------------------------------------------------------
+# Simulation configuration — edit here to change behaviour
+# ---------------------------------------------------------------------------
+
+MODEL_TYPE  = "vanilla"  # "vanilla" | "lstm" | "conv1d"
+WINDOW_SIZE = None        # None for vanilla; e.g. 30 for lstm / conv1d
+
+NUM_ROUNDS    = 3   # federated communication rounds
+LOCAL_EPOCHS  = 5   # local training epochs per round per device
+
+# Devices whose splits will participate in this run.
+# Each name must match a subdirectory under data/splits/.
+DEVICE_NAMES = [
+    "Distance",
+    "Flame_Sensor",
+    "IR_Receiver",
+    "phValue",
+]
+
+# Path to the splits root, relative to this file's directory (src/simulation/).
+SPLITS_DIR = os.path.join("..", "..", "data", "splits")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_paths(device_name: str) -> dict[str, str]:
+
+    """Return the train / val / test CSV paths for a given device.
+
+    Parameters
+    ----------
+    device_name : str
+        Name of the device directory under ``SPLITS_DIR``.
+
+    Returns
+    -------
+    dict[str, str]
+        ``{"train": ..., "val": ..., "test": ...}`` with absolute-style
+        paths relative to the working directory.
     """
-    The main entry point for the Federated Learning simulation.
 
-    This function sets up the simulation environment by initializing the 
-    central server and creating multiple simulated client devices. It assigns 
-    different statistical profiles to the devices to mimic real-world edge 
-    environments (e.g., fast connections, slow connections, and unpredictable 
-    network drops). Finally, it starts all threads and waits for the simulation 
-    to finish.
+    base = os.path.join(SPLITS_DIR, device_name)
+    return {
+        "train": os.path.join(base, "train.csv"),
+        "val":   os.path.join(base, "val.csv"),
+        "test":  os.path.join(base, "test.csv"),
+    }
+
+
+def _compute_input_dim(train_path: str, known_categories: dict) -> int:
+
+    """Derive the feature count after preprocessing one training split.
+
+    A temporary :class:`~preprocessor.IoTPreprocessor` is fitted on the
+    given file.  Its output column count becomes the ``input_dim`` shared
+    by the server and all devices.
+
+    Parameters
+    ----------
+    train_path : str
+        Path to any device's training CSV.
+    known_categories : dict[str, list]
+        Global category vocabulary from :func:`~preprocessor.build_global_categories`.
+
+    Returns
+    -------
+    int
+        Number of feature columns after cleaning, encoding, and scaling.
     """
 
-    NUM_CLIENTS = 4
-    NUM_ROUNDS = 3
+    pre = IoTPreprocessor(known_categories=known_categories)
+    X, _ = pre.fit_transform(pd.read_csv(train_path, low_memory=False))
+    return X.shape[1]
 
-    # 1. Instantiate the central server
-    server = CentralServer(total_clients = NUM_CLIENTS, rounds_to_simulate = NUM_ROUNDS)
 
-    devices = []
-    
-    # 2. Create clients with different speed/connection profiles
-    
-    # Fast and stable devices (Mean of 1s or 1.5s, low standard deviation)
-    devices.append(SimulatedDevice(client_id = 1, server = server, dist_type = 'gauss', mu = 1, sigma = 0.2))
-    devices.append(SimulatedDevice(client_id = 2, server = server, dist_type = 'gauss', mu = 1.5, sigma = 0.3))
-    
-    # Slow device (Mean of 4s)
-    devices.append(SimulatedDevice(client_id = 3, server = server, dist_type = 'gauss', mu = 4, sigma = 0.5))
-    
-    # Unpredictable device (Exponential distribution, mean of 3s)
-    devices.append(SimulatedDevice(client_id = 4, server = server, dist_type = 'expo', mu = 3))
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
+def main() -> None:
+
+    """Set up and run the Federated Learning simulation.
+
+    Steps
+    -----
+    1. Build the global category vocabulary from all training splits so every
+       device's one-hot encoding covers the same set of categories.
+    2. Preprocess one split to determine ``input_dim`` (the number of features
+       after encoding and scaling).  This value is the same for all devices
+       because the preprocessor guarantees a uniform feature space.
+    3. Initialise the :class:`~server.CentralServer` with the model
+       architecture and start-of-training global weights.
+    4. Create one :class:`~device.SimulatedDevice` thread per device, each
+       pointing at its own private data split.
+    5. Start all threads and wait for them to finish.
+    """
+    
+    all_paths = [_make_paths(name) for name in DEVICE_NAMES]
+    all_train_paths = [p["train"] for p in all_paths]
+
+    # --- Step 1: global vocabulary ---
+    print("Building global category vocabulary...")
+    known_categories = build_global_categories(all_train_paths)
+
+    # --- Step 2: feature dimension ---
+    print("Computing input dimension from first device split...")
+    input_dim = _compute_input_dim(all_train_paths[0], known_categories)
+    print(f"  input_dim = {input_dim}\n")
+
+    # --- Step 3: server ---
+    server = CentralServer(
+        total_clients     = len(DEVICE_NAMES),
+        rounds_to_simulate= NUM_ROUNDS,
+        model_type        = MODEL_TYPE,
+        input_dim         = input_dim,
+        window_size       = WINDOW_SIZE,
+    )
+
+    # --- Step 4: devices ---
+    devices = [
+        SimulatedDevice(
+            client_id        = name,
+            server           = server,
+            data_paths       = paths,
+            model_type       = MODEL_TYPE,
+            input_dim        = input_dim,
+            window_size      = WINDOW_SIZE,
+            known_categories = known_categories,
+            local_epochs     = LOCAL_EPOCHS,
+        )
+        for name, paths in zip(DEVICE_NAMES, all_paths)
+    ]
+
+    # --- Step 5: run ---
     print("--- Starting Federated Learning Simulation ---\n")
-    
-    # 3. Start all device threads
+
     for device in devices:
         device.start()
 
-    # 4. Wait for all devices to finish their execution (block main thread until done)
     for device in devices:
         device.join()
 
     print("\nAll threads closed. End of script.")
+
 
 if __name__ == "__main__":
     main()

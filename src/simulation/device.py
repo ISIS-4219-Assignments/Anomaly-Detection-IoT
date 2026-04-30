@@ -1,87 +1,193 @@
+"""
+device.py
+---------
+Simulated edge device for the Federated Learning simulation.
+
+Each device is a thread that runs the full local training loop:
+
+1. Load and preprocess its private data split once (before the round loop).
+2. For every round:
+   a. Build a fresh Keras model and load the current global weights.
+   b. Train locally for ``local_epochs`` epochs (autoencoder: target == input).
+   c. Send the updated weights to the server and wait at the barrier.
+
+The device never sees other devices' data — only its own train/val splits.
+All inter-device communication goes through :class:`~server.CentralServer`.
+"""
+
 import threading
-import random
-import time
+
+import numpy as np
+import pandas as pd
+
+from preprocessor import IoTPreprocessor
+from windowing import create_windows
+from models.factory import build_model
 
 
 class SimulatedDevice(threading.Thread):
+    """A thread that simulates a federated learning client device.
 
+    Each instance loads its own private data split, preprocesses it, and
+    trains a local model for every communication round.  After training it
+    submits its weights to the server via :meth:`~server.CentralServer.receive_update`
+    and blocks at the synchronisation barrier until all other devices are done.
+
+    Attributes
+    ----------
+    client_id : int or str
+        Unique identifier used in log messages.
+    server : CentralServer
+        Reference to the central server.
+    data_paths : dict[str, str]
+        Paths to the device's data splits.  Expected keys: ``"train"``,
+        ``"val"``, ``"test"``.
+    model_type : str
+        Architecture name — one of ``"vanilla"``, ``"lstm"``, ``"conv1d"``.
+    input_dim : int
+        Number of features after preprocessing; determines model input size.
+    window_size : int or None
+        Window length for sequence models; ``None`` for ``"vanilla"``.
+    known_categories : dict[str, list] or None
+        Global category vocabulary from :func:`~preprocessor.build_global_categories`.
+        Passed to :class:`~preprocessor.IoTPreprocessor` to guarantee a
+        uniform feature space across all devices.
+    local_epochs : int
+        Number of epochs to train locally each round.
     """
-    A thread class simulating a client device in a Federated Learning environment.
-    
-    This class mimics the behavior of an edge device that downloads a global model,
-    simulates local training with a specific time delay based on a statistical 
-    distribution, and then sends the updated local model back to the central server.
 
-    Attributes:
+    def __init__(
+        self,
+        client_id: int | str,
+        server,
+        data_paths: dict[str, str],
+        model_type: str,
+        input_dim: int,
+        window_size: int | None = None,
+        known_categories: dict | None = None,
+        local_epochs: int = 5,
+    ):
+        """Initialise the device thread.
 
-        client_id (int or str): A unique identifier for the simulated device.
-        server (CentralServer): The central server instance orchestrating the federated learning.
-        dist_type (str): The statistical distribution used to simulate training delay ('gauss' or 'expo').
-        mu (float): The mean value for the time delay distribution.
-        sigma (float, optional): The standard deviation for the Gaussian distribution. Defaults to None.
-    """
-
-
-    def __init__(self, client_id, server, dist_type, mu, sigma = None):
-        
+        Parameters
+        ----------
+        client_id : int or str
+            Unique identifier for this device.
+        server : CentralServer
+            The central server managing the global model and synchronisation.
+        data_paths : dict[str, str]
+            Mapping of split name to CSV file path.  Must contain at least
+            ``"train"`` and ``"val"`` keys.
+        model_type : str
+            Architecture to train.  One of ``"vanilla"``, ``"lstm"``,
+            ``"conv1d"``.
+        input_dim : int
+            Feature dimension after preprocessing.
+        window_size : int or None
+            Sliding-window size used by :func:`~windowing.create_windows`.
+            Must match the value used when computing ``input_dim``.
+            Pass ``None`` for the vanilla model.
+        known_categories : dict[str, list] or None
+            Global vocabulary for categorical one-hot encoding.  If ``None``
+            the preprocessor falls back to local-only categories, which may
+            produce a different feature space across devices.
+        local_epochs : int, optional
+            How many epochs to train in each federated round.  Default: 5.
         """
-        Initializes the SimulatedDevice instance.
-        
-        Args:
-
-            client_id (int or str): Unique ID for the device.
-            server (CentralServer): Reference to the central server.
-            dist_type (str): Type of distribution for the delay ('gauss' or 'expo').
-            mu (float): Mean time (in seconds) for the training delay.
-            sigma (float, optional): Standard deviation for the 'gauss' distribution. Defaults to None.
-        """
-
         super().__init__()
         self.client_id = client_id
         self.server = server
-        self.dist_type = dist_type
-        self.mu = mu
-        self.sigma = sigma
+        self.data_paths = data_paths
+        self.model_type = model_type
+        self.input_dim = input_dim
+        self.window_size = window_size
+        self.known_categories = known_categories
+        self.local_epochs = local_epochs
 
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
-    def run(self):
+    def _load_and_prepare(self) -> tuple[np.ndarray, np.ndarray]:
+        """Load CSV splits, preprocess, and apply windowing if needed.
 
+        The scaler is fitted on the training split and reused for validation,
+        which is the correct procedure in both standard ML and federated
+        learning.
+
+        Returns
+        -------
+        X_train : np.ndarray
+            Prepared training array.
+            Shape ``(N_train, input_dim)`` for vanilla;
+            ``(N_train - W + 1, W, input_dim)`` for sequence models.
+        X_val : np.ndarray
+            Prepared validation array (same shape convention as X_train).
         """
-        The main execution loop for the thread.
-        
-        Loops through the specified number of training rounds. In each round, it:
-        1. Retrieves the global model from the server.
-        2. Simulates local training time using the configured statistical distribution.
-        3. Updates the local model (simulating training on local data).
-        4. Sends the update to the central server and waits for synchronization.
+        pre = IoTPreprocessor(known_categories=self.known_categories)
+
+        train_df = pd.read_csv(self.data_paths["train"], low_memory=False)
+        val_df = pd.read_csv(self.data_paths["val"], low_memory=False)
+
+        X_train, _ = pre.fit_transform(train_df)
+        X_val, _ = pre.transform(val_df)
+
+        X_train = X_train.values.astype("float32")
+        X_val = X_val.values.astype("float32")
+
+        if self.window_size is not None:
+            X_train = create_windows(X_train, self.window_size)
+            X_val = create_windows(X_val, self.window_size)
+
+        return X_train, X_val
+
+    # ------------------------------------------------------------------
+    # Thread entry point
+    # ------------------------------------------------------------------
+
+    def run(self) -> None:
+        """Execute the device's federated learning loop.
+
+        Data is loaded once before the round loop to avoid redundant I/O.
+        For each round the device:
+
+        1. Builds a local model and loads the current global weights.
+        2. Trains for ``local_epochs`` epochs (autoencoder loss: MSE of
+           reconstruction).
+        3. Calls :meth:`~server.CentralServer.receive_update` to submit
+           weights and synchronise with the barrier.
         """
-        
+        print(f"[Device {self.client_id}] Loading and preprocessing data...")
+        X_train, X_val = self._load_and_prepare()
+        print(
+            f"[Device {self.client_id}] Ready. "
+            f"train={X_train.shape}, val={X_val.shape}"
+        )
+
         while self.server.current_round <= self.server.rounds_to_simulate:
-            
-            # 1. Download the global model
-            local_model = self.server.global_model
-            
-            # 2. Simulate training time and network latency
-            if self.dist_type == 'gauss':
-                # Normal distribution (e.g., stable devices with minor variations)
-                # Ensure the delay is at least 0.1 seconds to avoid negative times
-                delay = max(0.1, random.gauss(self.mu, self.sigma))
-            elif self.dist_type == 'expo':
-                # Exponential distribution (e.g., highly variable waiting times, unstable networks)
-                delay = random.expovariate(1.0 / self.mu)
-            else:
-                # Fallback delay if distribution type is unknown
-                delay = self.mu
-            
-            print(f"[Device {self.client_id}] Training... (Will take {delay:.2f}s)")
-            time.sleep(delay)
-            
-            # 3. Simulate local model improvement
-            # In a real scenario, this is where `model.fit()` would happen
-            improvement = random.uniform(0.5, 2.0) 
-            local_update = local_model + improvement
-            
-            # 4. Send the updated model back to the server
-            # The device will be paused inside this function by the server's threading.Barrier
-            # until the round ends. This guarantees zero synchronization risks!
-            self.server.receive_update(self.client_id, local_update)
+            round_num = self.server.current_round
+            print(
+                f"[Device {self.client_id}] Round {round_num} — "
+                f"building model and loading global weights..."
+            )
+
+            # Build a fresh model and load the current global weights
+            model = build_model(self.model_type, self.input_dim, self.window_size)
+            model.set_weights(self.server.global_model)
+
+            # Train locally; autoencoder target is the input itself
+            model.fit(
+                X_train,
+                X_train,
+                validation_data=(X_val, X_val),
+                epochs=self.local_epochs,
+                batch_size=64,
+                verbose=0,
+            )
+
+            print(
+                f"[Device {self.client_id}] Round {round_num} done. "
+                "Sending weights to server..."
+            )
+            # Submit weights and block at the barrier until all devices finish
+            self.server.receive_update(self.client_id, model.get_weights())

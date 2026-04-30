@@ -59,7 +59,19 @@ DROP_COLS = [
     "http.file_data", "http.request.full_uri", "icmp.transmit_timestamp",
     "http.request.uri.query", "tcp.options", "tcp.payload",
     "tcp.srcport", "tcp.dstport", "udp.port", "mqtt.msg",
+    "tcp.checksum",  # CRC checksum — random-looking, no anomaly signal
 ]
+
+
+"""Columns stored as hex strings (e.g. '0x00000010') that must be parsed to
+integers before the generic numeric coercion step.
+
+These are protocol flag/bitmask fields whose integer values carry real signal
+(e.g. TCP SYN/ACK/FIN bits).  They cannot be cast with pd.to_numeric directly
+because that function does not recognise the '0x' prefix.
+"""
+
+HEX_COLS = ["tcp.flags", "mqtt.conflags", "mqtt.hdrflags"]
 
 
 """Label columns returned separately as *y* by fit_transform / transform.
@@ -279,6 +291,22 @@ class IoTPreprocessor:
 
         existing = [c for c in DROP_COLS if c in df.columns]
         df = df.drop(columns=existing)
+
+        # Parse hex-string flag columns (e.g. '0x00000010') to integers.
+        # pd.to_numeric does not recognise the '0x' prefix, so these columns
+        # must be handled before the generic coercion step below.
+        for col in HEX_COLS:
+            if col in df.columns:
+                df[col] = df[col].apply(
+                    lambda v: int(v, 0) if isinstance(v, str) else v
+                )
+
+        # Coerce remaining feature columns to numeric, turning any
+        # non-parseable residual values into NaN for the dropna step.
+        skip = set(TARGET_COLS) | set(CATEGORICAL_COLS)
+        numeric_cols = [c for c in df.columns if c not in skip]
+        df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+
         df = df.dropna()
         df = df.drop_duplicates()
         return df.reset_index(drop=True)

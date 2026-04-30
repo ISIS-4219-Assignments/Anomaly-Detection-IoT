@@ -1,95 +1,172 @@
+"""
+server.py
+---------
+Central server for the Federated Learning simulation.
+
+The server owns the global model weights and coordinates all training rounds.
+Weights are stored as a **list of NumPy arrays** — the format returned by
+:meth:`keras.Model.get_weights` — so no PyTorch or framework-specific types
+appear here.
+
+Aggregation uses Federated Averaging (FedAvg): each layer's weights are
+updated to the element-wise mean of the corresponding layers received from
+all clients.
+
+Synchronization design
+----------------------
+A :class:`threading.Barrier` is initialised with ``total_clients`` parties
+and an ``action=self.aggregate_and_update`` callback.  When the last device
+calls :meth:`receive_update`, the barrier automatically fires
+``aggregate_and_update`` before releasing all threads into the next round.
+This eliminates explicit round management in device threads and is
+race-condition-free by construction.
+"""
+
+
+from models.factory import build_model
+import numpy as np
 import threading
 
 
 class CentralServer:
 
+    """Orchestrates the Federated Learning process and maintains global weights.
+
+    Attributes
+    ----------
+    global_model : list[np.ndarray]
+        Current global model weights in Keras ``get_weights()`` format.
+        Initialised from a freshly-built model so the weight structure is
+        always consistent with the chosen architecture.
+    updates : list[list[np.ndarray]]
+        Local weight updates collected during the current round.  Cleared
+        after every aggregation.
+    lock : threading.Lock
+        Guards appends to ``updates`` so concurrent device threads cannot
+        corrupt the list.
+    total_clients : int
+        Number of devices participating in every round.
+    rounds_to_simulate : int
+        Total number of communication rounds to run.
+    current_round : int
+        1-based index of the round currently in progress.
+    sync_barrier : threading.Barrier
+        Blocks each device after it submits its update; released only when
+        all ``total_clients`` devices have arrived.  Automatically triggers
+        :meth:`aggregate_and_update` at that point.
     """
-    Orchestrates the Federated Learning process and maintains the global model.
-    
-    This class is responsible for collecting local model updates from all 
-    connected client devices in a thread-safe manner. Once all clients have 
-    submitted their updates for the current round, it aggregates them 
-    (simulating Federated Averaging or FedAvg) and starts the next round.
 
-    Attributes:
-
-        global_model (float): The current weights of the global model (simplified as a float).
-        updates (list): A list temporarily storing the local updates received in the current round.
-        lock (threading.Lock): A mutual exclusion lock to prevent race conditions when appending updates.
-        total_clients (int): The total number of client devices participating in the training.
-        rounds_to_simulate (int): The total number of federated learning rounds to execute.
-        current_round (int): Tracks the current training round.
-        sync_barrier (threading.Barrier): A synchronization primitive that blocks client threads
-            until all updates are received, then triggers the aggregation automatically.
-    """
-
-    def __init__(self, total_clients, rounds_to_simulate):
-
-        """
-        Initializes the CentralServer instance.
+    def __init__(
+        self,
+        total_clients: int,
+        rounds_to_simulate: int,
+        model_type: str,
+        input_dim: int,
+        window_size: int | None = None,
+    ):
         
-        Args:
+        """Initialise the server and the global model.
 
-            total_clients (int): The number of devices that will participate in each round.
-            rounds_to_simulate (int): How many communication rounds to perform before stopping.
+        A model is built once using :func:`~models.factory.build_model` solely
+        to obtain the correct weight structure (shapes and dtypes).  The same
+        structure is then expected from every device update throughout training.
+
+        Parameters
+        ----------
+        total_clients : int
+            Number of devices that will participate in each round.
+        rounds_to_simulate : int
+            How many communication rounds to run before stopping.
+        model_type : str
+            Architecture name forwarded to :func:`~models.factory.build_model`.
+            One of ``"vanilla"``, ``"lstm"``, ``"conv1d"``.
+        input_dim : int
+            Number of features after preprocessing.  Passed to the model
+            builder to determine layer sizes.
+        window_size : int or None
+            Sliding-window length; required for ``"lstm"`` and ``"conv1d"``,
+            ``None`` for ``"vanilla"``.
         """
 
-        self.global_model = 0.0  # Simulated model weights
-        self.updates = []
-        self.lock = threading.Lock() # Crucial to prevent threads from colliding
+        # Build a throw-away model to capture the initial weight structure
+        initial_model = build_model(model_type, input_dim, window_size)
+        self.global_model: list[np.ndarray] = initial_model.get_weights()
+
+        self.updates: list[list[np.ndarray]] = []
+        self.lock = threading.Lock()
         self.total_clients = total_clients
         self.rounds_to_simulate = rounds_to_simulate
         self.current_round = 1
+
+        # When the last thread arrives the barrier fires aggregate_and_update
+        # before releasing all threads, so no device ever sees a partial update.
+        self.sync_barrier = threading.Barrier(
+            self.total_clients, action=self.aggregate_and_update
+        )
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def receive_update(
+        self, client_id: int | str, local_weights: list[np.ndarray]
+    ) -> None:
         
-        # The barrier waits for exactly 'total_clients' threads.
-        # When the very last thread arrives, it automatically executes the 'action' 
-        # (aggregate_and_update) before releasing all threads to start the next round.
-        self.sync_barrier = threading.Barrier(self.total_clients, action=self.aggregate_and_update)
+        """Accept a local weight update and block until the round ends.
 
-    def receive_update(self, client_id, local_update):
+        The update is appended to :attr:`updates` under the lock to prevent
+        concurrent writes from corrupting the list.  The thread then waits at
+        the barrier; the last arriving thread triggers :meth:`aggregate_and_update`.
 
-        """
-        Receives and stores a local model update from a client device.
-        
-        This method uses a threading lock to ensure that multiple devices 
-        can send their updates concurrently without corrupting the updates list.
-        After saving the update, it pauses the calling thread until all other 
-        devices finish their training for the current round.
-
-        Args:
-            client_id (int or str): The identifier of the device sending the update.
-            local_update (float): The updated model weights from the device.
+        Parameters
+        ----------
+        client_id : int or str
+            Identifier of the submitting device (used for logging only).
+        local_weights : list[np.ndarray]
+            Weights from the device's locally-trained model in Keras
+            ``get_weights()`` format.  Must match the structure of
+            :attr:`global_model`.
         """
 
-        # Acquire lock to safely append to the shared list
         with self.lock:
-            self.updates.append(local_update)
-            print(f"[Server] Received update from Device {client_id}. ({len(self.updates)}/{self.total_clients})")
-        
-        # Pause this device's thread until all other devices reach this exact point
+            self.updates.append(local_weights)
+            print(
+                f"[Server] Received update from Device {client_id}. "
+                f"({len(self.updates)}/{self.total_clients})"
+            )
+
+        # Block until all clients reach this point; last one aggregates
         self.sync_barrier.wait()
 
-    def aggregate_and_update(self):
+    # ------------------------------------------------------------------
+    # Internal – called automatically by the barrier
+    # ------------------------------------------------------------------
 
-        """
-        Aggregates the collected local updates and updates the global model.
-        
-        This function is automatically triggered by the threading.Barrier once 
-        all clients have submitted their updates. It calculates the average of 
-        the received weights (simulating FedAvg), clears the update list for 
-        the next round, and increments the round counter.
+    def aggregate_and_update(self) -> None:
+
+        """Average all collected local weights and update the global model.
+
+        Implements FedAvg: for each weight tensor, the new global value is
+        the element-wise mean of the corresponding tensors from all clients.
+        The updates list is cleared and the round counter incremented before
+        threads are released.
+
+        This method is invoked automatically by :attr:`sync_barrier` and
+        should never be called directly.
         """
         
         print(f"\n--- Aggregating models for Round {self.current_round} ---")
-        
-        # FedAvg: We average the weights (simulated here with simple mathematical averages)
-        self.global_model = sum(self.updates) / len(self.updates)
-        self.updates = [] # Clear the list for the next round
-        
-        print(f"[Server] New global model updated: {self.global_model:.4f}\n")
-        
+
+        # FedAvg: layer-wise mean across all client weight lists
+        self.global_model = [
+            np.mean([client_weights[i] for client_weights in self.updates], axis=0)
+            for i in range(len(self.global_model))
+        ]
+
+        self.updates = []  # clear for next round
+        print(f"[Server] Global model updated after round {self.current_round}.\n")
+
         self.current_round += 1
-        
-        # Check if the simulation has finished
+
         if self.current_round > self.rounds_to_simulate:
             print("[Server] Federated Learning simulation completed.")

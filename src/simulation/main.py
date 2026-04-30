@@ -23,6 +23,9 @@ Run from this directory
 """
 
 
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # suppress XLA/TF C++ info logs
+
 from preprocessor import IoTPreprocessor, build_global_categories
 from device import SimulatedDevice
 from server import CentralServer
@@ -36,7 +39,7 @@ import os
 # ---------------------------------------------------------------------------
 
 
-MODEL_TYPE  = "lstm"  # "vanilla" | "lstm" | "conv1d" | "transformer"
+MODEL_TYPE  = "transformer"  # "vanilla" | "lstm" | "conv1d" | "transformer"
 WINDOW_SIZE = 30       # None for vanilla; e.g. 30 for lstm / conv1d
 
 NUM_ROUNDS    = 3   # federated communication rounds
@@ -46,9 +49,9 @@ LOCAL_EPOCHS  = 5   # local training epochs per round per device
 # Each name must match a subdirectory under data/splits/.
 DEVICE_NAMES = [
     "Distance",
-    "Flame_Sensor",
-    "IR_Receiver",
-    "phValue",
+    #"Flame_Sensor",
+    #"IR_Receiver",
+    #"phValue",
 ]
 
 # Absolute dir of src/simulation/

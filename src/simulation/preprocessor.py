@@ -9,17 +9,32 @@ Typical usage per device
 ::
 
     import pandas as pd
-    from preprocessor import IoTPreprocessor
+    from preprocessor import IoTPreprocessor, build_global_categories
 
+    # --- Run once before any device trains ---
+    all_train_paths = [
+        "data/splits/device1/train.csv",
+        "data/splits/device2/train.csv",
+        ...
+    ]
+    known_categories = build_global_categories(all_train_paths)
+
+    # --- Per device ---
     train_df = pd.read_csv("data/splits/<device>/train.csv")
     val_df   = pd.read_csv("data/splits/<device>/val.csv")
     test_df  = pd.read_csv("data/splits/<device>/test.csv")
 
-    pre = IoTPreprocessor()
+    pre = IoTPreprocessor(known_categories=known_categories)
 
     X_train, y_train = pre.fit_transform(train_df)
     X_val,   y_val   = pre.transform(val_df)
     X_test,  y_test  = pre.transform(test_df)
+
+Passing ``known_categories`` guarantees that every device produces
+one-hot columns for **all** possible values seen across the federation,
+not just those present in its own data.  This keeps the feature space
+— and therefore the model architecture — identical across all devices,
+which is a hard requirement for Federated Learning.
 
 The scaler is fitted exclusively on training data and reused for val/test,
 which is the correct approach in both standard ML and federated learning.
@@ -75,6 +90,40 @@ CATEGORICAL_COLS = [
 ]
 
 
+def build_global_categories(train_paths: list[str]) -> dict[str, list]:
+
+    """Scan all training CSVs and return every unique value per categorical column.
+
+    This must be called once — before any device creates an
+    :class:`IoTPreprocessor` — so that every device encodes categoricals
+    against the same global vocabulary.  Passing the returned dict to
+    ``IoTPreprocessor(known_categories=...)`` guarantees a uniform feature
+    space across the entire federation.
+
+    Only the columns listed in :data:`CATEGORICAL_COLS` are read from each
+    file, so the function is fast even for large CSVs.
+
+    Parameters
+    ----------
+    train_paths : list[str]
+        Paths to every device's training CSV.
+
+    Returns
+    -------
+    dict[str, list]
+        ``{column_name: sorted_list_of_unique_values}`` for every
+        categorical column that appears in at least one training file.
+    """
+    
+    categories: dict[str, set] = {col: set() for col in CATEGORICAL_COLS}
+    for path in train_paths:
+        df = pd.read_csv(path, usecols=lambda c: c in CATEGORICAL_COLS)
+        for col in CATEGORICAL_COLS:
+            if col in df.columns:
+                categories[col].update(df[col].dropna().unique())
+    return {col: sorted(vals) for col, vals in categories.items() if vals}
+
+
 class IoTPreprocessor:
 
     """Stateful preprocessor for the IoT dataset.
@@ -97,15 +146,18 @@ class IoTPreprocessor:
     both, which guarantees that val and test splits are processed identically
     to training data.
 
-    Column alignment
-    ----------------
-    Because each device in the federation captures a different subset of
-    network protocols, the set of one-hot columns produced by encoding can
-    differ between splits.  :meth:`transform` calls
-    ``DataFrame.reindex(columns=self.feature_columns, fill_value=0)`` so that
-    the output always has exactly the same columns (in the same order) as the
-    training split — new categories seen at inference time are dropped, and
-    categories absent from a split are filled with zero.
+    Federated Learning — uniform feature space
+    ------------------------------------------
+    In a federation each device sees only a subset of the data, so a naive
+    ``pd.get_dummies`` call produces a different set of indicator columns per
+    device.  This breaks model aggregation because the weight tensors have
+    different shapes.
+
+    Pass the dict returned by :func:`build_global_categories` as
+    ``known_categories`` to fix this.  :meth:`_encode` then forces every
+    categorical column to produce exactly the same indicator columns on every
+    device — categories absent from a device's data become all-zero columns
+    instead of missing entirely.
 
     Attributes
     ----------
@@ -114,11 +166,16 @@ class IoTPreprocessor:
     feature_columns : list[str] or None
         Ordered list of feature column names produced by the training split.
         ``None`` until :meth:`fit_transform` is called.
+    known_categories : dict[str, list] or None
+        Global vocabulary ``{col: [values]}`` supplied at construction time.
+        When set, the feature space is fixed to these categories regardless of
+        what each device's local data contains.
     """
 
-    def __init__(self):
+    def __init__(self, known_categories: dict[str, list] | None = None):
         self.scaler = StandardScaler()
         self.feature_columns: list[str] | None = None
+        self.known_categories = known_categories
 
     # ------------------------------------------------------------------
     # Public API
@@ -231,9 +288,22 @@ class IoTPreprocessor:
         """One-hot encode the categorical columns listed in :data:`CATEGORICAL_COLS`.
 
         Each categorical column ``col`` is replaced by binary indicator columns
-        named ``col-<category>``.  Columns absent from *df* are silently
-        skipped so the same preprocessor works across devices with different
-        protocol mixes.
+        named ``col-<category>``.
+
+        When ``self.known_categories`` is set (the recommended FL path), the
+        dummy columns for every categorical are reindexed to exactly the global
+        vocabulary supplied at construction time.  This means:
+
+        * Categories present in the global vocab but absent from this device's
+          data become all-zero columns (not dropped).
+        * Categories in this device's data that are not in the global vocab are
+          silently dropped (they would produce unseen model inputs).
+        * Categorical columns entirely absent from *df* are still represented as
+          all-zero dummy columns in the output.
+
+        When ``self.known_categories`` is ``None`` the method falls back to the
+        local-only behaviour: columns absent from *df* are skipped and only the
+        categories observed locally are encoded.
 
         Parameters
         ----------
@@ -247,10 +317,21 @@ class IoTPreprocessor:
         """
 
         for col in CATEGORICAL_COLS:
-            if col not in df.columns:
-                continue
-            dummies = pd.get_dummies(df[col], prefix=col, prefix_sep="-")
-            df = pd.concat([df.drop(columns=[col]), dummies], axis=1)
+            if col in df.columns:
+                dummies = pd.get_dummies(df[col], prefix=col, prefix_sep="-")
+                df = df.drop(columns=[col])
+            else:
+                # Column absent from this device; start with an empty frame
+                # so the reindex below can still add the expected zero columns.
+                dummies = pd.DataFrame(index=df.index)
+
+            if self.known_categories and col in self.known_categories:
+                expected = [f"{col}-{cat}" for cat in self.known_categories[col]]
+                dummies = dummies.reindex(columns=expected, fill_value=0)
+
+            if not dummies.empty:
+                df = pd.concat([df, dummies], axis=1)
+
         return df
 
     def _split_xy(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:

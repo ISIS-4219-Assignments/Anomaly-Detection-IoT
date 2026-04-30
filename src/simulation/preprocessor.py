@@ -137,6 +137,29 @@ def build_global_categories(train_paths: list[str]) -> dict[str, list]:
     return {col: sorted(vals) for col, vals in categories.items() if vals}
 
 
+def _parse_hex_value(v):
+    """Convert a single value from a HEX_COLS column to a numeric type.
+
+    Handles three formats found across train/val/test splits:
+
+    - ``'0x00000010'`` — hex string → parsed as integer via ``int(v, 0)``.
+    - ``'0.0'`` / ``'16.0'`` — float string → parsed via ``float(v)``.
+    - Already numeric (int or float) — returned unchanged.
+
+    Non-parseable strings become ``float('nan')`` and are later removed by
+    the ``dropna`` step in :meth:`IoTPreprocessor._clean`.
+    """
+    if not isinstance(v, str):
+        return v
+    try:
+        return int(v, 0)   # '0x...' or plain integer string
+    except ValueError:
+        try:
+            return float(v)   # '0.0', '16.0', etc.
+        except ValueError:
+            return float("nan")
+
+
 class IoTPreprocessor:
 
     """Stateful preprocessor for the IoT dataset.
@@ -298,9 +321,7 @@ class IoTPreprocessor:
         # must be handled before the generic coercion step below.
         for col in HEX_COLS:
             if col in df.columns:
-                df[col] = df[col].apply(
-                    lambda v: int(v, 0) if isinstance(v, str) else v
-                )
+                df[col] = df[col].apply(_parse_hex_value)
 
         # Coerce remaining feature columns to numeric, turning any
         # non-parseable residual values into NaN for the dropna step.

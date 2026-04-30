@@ -23,6 +23,7 @@ from windowing import create_windows
 import pandas as pd
 import numpy as np
 import threading
+from sklearn.metrics import roc_auc_score
 
 
 class SimulatedDevice(threading.Thread):
@@ -138,6 +139,9 @@ class SimulatedDevice(threading.Thread):
         X_train, _ = pre.fit_transform(train_df)
         X_val, _ = pre.transform(val_df)
 
+        # Keep the fitted preprocessor so evaluate() can reuse the scaler
+        self._preprocessor = pre
+
         X_train = X_train.values.astype("float32")
         X_val = X_val.values.astype("float32")
 
@@ -185,7 +189,7 @@ class SimulatedDevice(threading.Thread):
             model.set_weights(self.server.global_model)
 
             # Train locally; autoencoder target is the input itself
-            model.fit(
+            history = model.fit(
                 X_train,
                 X_train,
                 validation_data=(X_val, X_val),
@@ -194,10 +198,83 @@ class SimulatedDevice(threading.Thread):
                 verbose=0,
             )
 
+            train_loss = history.history["loss"][-1]
+            val_loss   = history.history["val_loss"][-1]
             print(
-                f"[Device {self.client_id}] Round {round_num} done. "
+                f"[Device {self.client_id}] Round {round_num} — "
+                f"loss: {train_loss:.4f}, val_loss: {val_loss:.4f}. "
                 "Sending weights to server..."
             )
-            
+
             # Submit weights and block at the barrier until all devices finish
             self.server.receive_update(self.client_id, model.get_weights())
+
+        # ---- Evaluation phase (runs after all training rounds complete) ----
+        self.evaluate(self.server.global_model)
+
+    def evaluate(self, global_weights: list[np.ndarray]) -> None:
+        """Evaluate the global model on this device's test split.
+
+        Loads the test CSV, applies the fitted scaler from training (no
+        re-fitting), optionally windows the data, then computes per-sample
+        reconstruction error.  Because the test split contains both normal
+        and attack traffic, the method reports:
+
+        - **normal_mse** — mean reconstruction error on normal samples.
+        - **attack_mse** — mean reconstruction error on attack samples.
+          A well-trained anomaly detector produces a clearly higher value
+          here than ``normal_mse``.
+        - **AUROC** — area under the ROC curve using reconstruction error
+          as the anomaly score.  Threshold-free; 1.0 is perfect, 0.5 is
+          random.
+
+        For windowed models the label assigned to each window is the label
+        of its *last* row (most recent trace in the window).
+
+        Parameters
+        ----------
+        global_weights : list[np.ndarray]
+            Final global model weights from the server, in Keras
+            ``get_weights()`` format.
+        """
+        print(f"[Device {self.client_id}] Running test evaluation...")
+
+        # Reuse the scaler fitted during training — never refit on test data
+        test_df = pd.read_csv(self.data_paths["test"], low_memory=False)
+        X_test, y_test = self._preprocessor.transform(test_df)
+
+        X_test = X_test.values.astype("float32")
+        y_test = y_test["Attack_label"].values
+
+        if self.window_size is not None:
+            X_test = create_windows(X_test, self.window_size)
+            # Label of a window = label of its last row
+            y_test = y_test[self.window_size - 1:]
+
+        # Build model and load final global weights
+        model = build_model(self.model_type, self.input_dim, self.window_size)
+        model.set_weights(global_weights)
+
+        X_pred = model.predict(X_test, batch_size=256, verbose=0)
+
+        # Per-sample reconstruction error (MSE averaged over all non-batch dims)
+        axes = tuple(range(1, X_test.ndim))  # (1,) for vanilla; (1, 2) for sequence
+        errors = np.mean((X_test - X_pred) ** 2, axis=axes)
+
+        normal_mask = y_test == 0
+        attack_mask = y_test == 1
+
+        normal_mse = float(np.mean(errors[normal_mask])) if normal_mask.any() else float("nan")
+        attack_mse = float(np.mean(errors[attack_mask])) if attack_mask.any() else float("nan")
+
+        if normal_mask.any() and attack_mask.any():
+            auroc = roc_auc_score(y_test, errors)
+        else:
+            auroc = float("nan")
+
+        print(
+            f"[Device {self.client_id}] Test results — "
+            f"AUROC: {auroc:.4f} | "
+            f"normal_mse: {normal_mse:.4f} | "
+            f"attack_mse: {attack_mse:.4f}"
+        )

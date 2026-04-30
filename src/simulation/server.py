@@ -99,6 +99,11 @@ class CentralServer:
         self.rounds_to_simulate = rounds_to_simulate
         self.current_round = 1
 
+        # Stored so save_global_model() can rebuild the correct architecture
+        self.model_type = model_type
+        self.input_dim = input_dim
+        self.window_size = window_size
+
         # When the last thread arrives the barrier fires aggregate_and_update
         # before releasing all threads, so no device ever sees a partial update.
         self.sync_barrier = threading.Barrier(
@@ -173,3 +178,35 @@ class CentralServer:
 
         if self.current_round > self.rounds_to_simulate:
             print("[Server] Federated Learning simulation completed.")
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save_global_model(self, save_dir: str) -> str:
+        """Build a Keras model, load the current global weights, and save it.
+
+        The file is saved in Keras's native ``.keras`` format under
+        ``save_dir/<model_type>_autoencoder_final.keras``.  The directory is
+        created automatically if it does not exist.
+
+        Parameters
+        ----------
+        save_dir : str
+            Directory where the model file will be written.
+
+        Returns
+        -------
+        str
+            Absolute path of the saved model file.
+        """
+        import os
+
+        model = build_model(self.model_type, self.input_dim, self.window_size)
+        model.set_weights(self.global_model)
+
+        os.makedirs(save_dir, exist_ok=True)
+        path = os.path.join(save_dir, f"{self.model_type}_autoencoder_final.keras")
+        model.save(path)
+        print(f"[Server] Global model saved → {path}")
+        return path

@@ -52,6 +52,9 @@ DEVICE_NAMES = [
 # Path to the splits root, relative to this file's directory (src/simulation/).
 SPLITS_DIR = os.path.join("..", "..", "data", "splits")
 
+# Directory where the final global model will be saved (src/models/).
+MODELS_DIR = os.path.join("..", "models")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -176,7 +179,12 @@ def main() -> None:
     for device in devices:
         device.join()
 
-    print("\nAll threads closed. End of script.")
+    print("\nAll threads closed.")
+
+    # Save the final global model to src/models/
+    server.save_global_model(MODELS_DIR)
+
+    print("\nDone.")
 
 
 if __name__ == "__main__":

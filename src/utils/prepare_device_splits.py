@@ -1,6 +1,7 @@
 """
 prepare_device_splits.py
 ------------------------
+
 Builds per-device train / val / test CSV splits for the federated learning
 pipeline.
 
@@ -19,7 +20,7 @@ and all attacks are covered.
 
 Test set layout per device (example with 2 assigned attacks)
 -------------------------------------------------------------
-    [normal_seg_1]
+    + [normal_seg_1]
     + [attack_1 rows sampled to budget]
     + [normal_seg_2]
     + [attack_2 rows sampled to budget]
@@ -45,8 +46,8 @@ import os
 
 TRAIN_RATIO         = 0.70
 VAL_RATIO           = 0.15
-CAP_FACTOR    = 0.2   # load only 20% of each device's rows
-ATTACK_FACTOR = 0.1   # attack rows in test capped at 10% of loaded normal rows
+CAP_FACTOR          = 0.2   # load only 20% of each device's rows
+ATTACK_FACTOR       = 0.1   # attack rows in test capped at 10% of loaded normal rows
 
 NORMAL_DIR = os.path.join("data", "normal_traffic")
 ATTACK_DIR = os.path.join("data", "attack_traffic")

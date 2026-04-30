@@ -1,6 +1,7 @@
 """
 download_data.py
 ----------------
+
 Downloads the EdgeIIoTSet dataset from Kaggle via kagglehub and organises it
 into the project's data/ directory.
 
@@ -12,6 +13,7 @@ After a successful run the project data layout will be:
         attack_traffic/   <- CSV files for 14 attack categories
         normal_traffic/   <- CSV files for normal IoT sensor readings
 """
+
 
 import kagglehub
 import shutil

@@ -34,8 +34,8 @@ import os
 # ---------------------------------------------------------------------------
 
 
-MODEL_TYPE  = "vanilla"  # "vanilla" | "lstm" | "conv1d"
-WINDOW_SIZE = None        # None for vanilla; e.g. 30 for lstm / conv1d
+MODEL_TYPE  = "lstm"  # "vanilla" | "lstm" | "conv1d"
+WINDOW_SIZE = 30       # None for vanilla; e.g. 30 for lstm / conv1d
 
 NUM_ROUNDS    = 3   # federated communication rounds
 LOCAL_EPOCHS  = 5   # local training epochs per round per device

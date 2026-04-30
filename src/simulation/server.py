@@ -1,6 +1,7 @@
 """
 server.py
 ---------
+
 Central server for the Federated Learning simulation.
 
 The server owns the global model weights and coordinates all training rounds.
@@ -108,6 +109,7 @@ class CentralServer:
     # Public API
     # ------------------------------------------------------------------
 
+
     def receive_update(
         self, client_id: int | str, local_weights: list[np.ndarray]
     ) -> None:
@@ -141,6 +143,7 @@ class CentralServer:
     # ------------------------------------------------------------------
     # Internal – called automatically by the barrier
     # ------------------------------------------------------------------
+
 
     def aggregate_and_update(self) -> None:
 

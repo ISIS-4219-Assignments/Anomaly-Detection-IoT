@@ -1,6 +1,7 @@
 """
 main.py
 -------
+
 Entry point for the Federated Learning simulation.
 
 Swapping between model architectures
@@ -32,6 +33,7 @@ import os
 # Simulation configuration — edit here to change behaviour
 # ---------------------------------------------------------------------------
 
+
 MODEL_TYPE  = "vanilla"  # "vanilla" | "lstm" | "conv1d"
 WINDOW_SIZE = None        # None for vanilla; e.g. 30 for lstm / conv1d
 
@@ -54,6 +56,7 @@ SPLITS_DIR = os.path.join("..", "..", "data", "splits")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_paths(device_name: str) -> dict[str, str]:
 
@@ -108,6 +111,7 @@ def _compute_input_dim(train_path: str, known_categories: dict) -> int:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
 

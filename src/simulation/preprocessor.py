@@ -1,6 +1,7 @@
 """
 preprocessor.py
 ---------------
+
 Stateful preprocessing pipeline for the IoT dataset used in the
 federated learning simulation.
 
@@ -311,6 +312,7 @@ class IoTPreprocessor:
         df = df.drop_duplicates()
         return df.reset_index(drop=True)
 
+
     def _encode(self, df: pd.DataFrame) -> pd.DataFrame:
 
         """One-hot encode the categorical columns listed in :data:`CATEGORICAL_COLS`.
@@ -361,6 +363,7 @@ class IoTPreprocessor:
                 df = pd.concat([df, dummies], axis=1)
 
         return df
+
 
     def _split_xy(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 

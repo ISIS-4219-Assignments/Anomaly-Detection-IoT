@@ -1,6 +1,7 @@
 """
 windowing.py
 ------------
+
 Converts a 2-D feature matrix into overlapping sliding windows, turning a
 flat tabular dataset into a time-series dataset suitable for LSTM and Conv1D
 autoencoders.

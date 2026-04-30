@@ -1,6 +1,7 @@
 """
 device.py
 ---------
+
 Simulated edge device for the Federated Learning simulation.
 
 Each device is a thread that runs the full local training loop:
@@ -15,17 +16,17 @@ The device never sees other devices' data — only its own train/val splits.
 All inter-device communication goes through :class:`~server.CentralServer`.
 """
 
-import threading
-
-import numpy as np
-import pandas as pd
 
 from preprocessor import IoTPreprocessor
-from windowing import create_windows
 from models.factory import build_model
+from windowing import create_windows
+import pandas as pd
+import numpy as np
+import threading
 
 
 class SimulatedDevice(threading.Thread):
+
     """A thread that simulates a federated learning client device.
 
     Each instance loads its own private data split, preprocesses it, and
@@ -67,6 +68,7 @@ class SimulatedDevice(threading.Thread):
         known_categories: dict | None = None,
         local_epochs: int = 5,
     ):
+        
         """Initialise the device thread.
 
         Parameters
@@ -94,6 +96,7 @@ class SimulatedDevice(threading.Thread):
         local_epochs : int, optional
             How many epochs to train in each federated round.  Default: 5.
         """
+
         super().__init__()
         self.client_id = client_id
         self.server = server
@@ -108,7 +111,9 @@ class SimulatedDevice(threading.Thread):
     # Internal helpers
     # ------------------------------------------------------------------
 
+
     def _load_and_prepare(self) -> tuple[np.ndarray, np.ndarray]:
+
         """Load CSV splits, preprocess, and apply windowing if needed.
 
         The scaler is fitted on the training split and reused for validation,
@@ -124,6 +129,7 @@ class SimulatedDevice(threading.Thread):
         X_val : np.ndarray
             Prepared validation array (same shape convention as X_train).
         """
+
         pre = IoTPreprocessor(known_categories=self.known_categories)
 
         train_df = pd.read_csv(self.data_paths["train"], low_memory=False)
@@ -145,7 +151,9 @@ class SimulatedDevice(threading.Thread):
     # Thread entry point
     # ------------------------------------------------------------------
 
+
     def run(self) -> None:
+
         """Execute the device's federated learning loop.
 
         Data is loaded once before the round loop to avoid redundant I/O.
@@ -157,6 +165,7 @@ class SimulatedDevice(threading.Thread):
         3. Calls :meth:`~server.CentralServer.receive_update` to submit
            weights and synchronise with the barrier.
         """
+
         print(f"[Device {self.client_id}] Loading and preprocessing data...")
         X_train, X_val = self._load_and_prepare()
         print(
@@ -189,5 +198,6 @@ class SimulatedDevice(threading.Thread):
                 f"[Device {self.client_id}] Round {round_num} done. "
                 "Sending weights to server..."
             )
+            
             # Submit weights and block at the barrier until all devices finish
             self.server.receive_update(self.client_id, model.get_weights())

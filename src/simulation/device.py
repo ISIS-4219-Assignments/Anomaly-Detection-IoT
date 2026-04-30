@@ -23,7 +23,7 @@ from windowing import create_windows
 import pandas as pd
 import numpy as np
 import threading
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix
 
 
 class SimulatedDevice(threading.Thread):
@@ -209,10 +209,27 @@ class SimulatedDevice(threading.Thread):
             # Submit weights and block at the barrier until all devices finish
             self.server.receive_update(self.client_id, model.get_weights())
 
-        # ---- Evaluation phase (runs after all training rounds complete) ----
-        self.evaluate(self.server.global_model)
+        # ---- Threshold phase ----
+        print(f"[Device {self.client_id}] Computing anomaly threshold...")
 
-    def evaluate(self, global_weights: list[np.ndarray]) -> None:
+        final_model = build_model(self.model_type, self.input_dim, self.window_size)
+        final_model.set_weights(self.server.global_model)
+
+        X_val_pred = final_model.predict(X_val, batch_size=256, verbose=0)
+
+        axes = tuple(range(1, X_val.ndim))
+        val_errors = np.mean((X_val - X_val_pred) ** 2, axis=axes)
+
+        threshold = float(np.percentile(val_errors, 99))
+
+        print(
+            f"[Device {self.client_id}] Threshold computed from validation: "
+            f"{threshold:.6f}"
+        )
+        # ---- Evaluation phase (runs after all training rounds complete) ----
+        self.evaluate(self.server.global_model, threshold)
+
+    def evaluate(self, global_weights: list[np.ndarray], threshold: float) -> None:
         """Evaluate the global model on this device's test split.
 
         Loads the test CSV, applies the fitted scaler from training (no
@@ -260,12 +277,18 @@ class SimulatedDevice(threading.Thread):
         # Per-sample reconstruction error (MSE averaged over all non-batch dims)
         axes = tuple(range(1, X_test.ndim))  # (1,) for vanilla; (1, 2) for sequence
         errors = np.mean((X_test - X_pred) ** 2, axis=axes)
+        
+        y_pred = (errors > threshold).astype(int)
 
         normal_mask = y_test == 0
         attack_mask = y_test == 1
 
         normal_mse = float(np.mean(errors[normal_mask])) if normal_mask.any() else float("nan")
         attack_mse = float(np.mean(errors[attack_mask])) if attack_mask.any() else float("nan")
+        precision = precision_score(y_test, y_pred, zero_division=0)
+        recall = recall_score(y_test, y_pred, zero_division=0)
+        f1 = f1_score(y_test, y_pred, zero_division=0)
+        cm = confusion_matrix(y_test, y_pred)
 
         if normal_mask.any() and attack_mask.any():
             auroc = roc_auc_score(y_test, errors)
@@ -274,7 +297,14 @@ class SimulatedDevice(threading.Thread):
 
         print(
             f"[Device {self.client_id}] Test results — "
+            f"Threshold: {threshold:.6f} | "
             f"AUROC: {auroc:.4f} | "
+            f"Precision: {precision:.4f} | "
+            f"Recall: {recall:.4f} | "
+            f"F1: {f1:.4f} | "
             f"normal_mse: {normal_mse:.4f} | "
             f"attack_mse: {attack_mse:.4f}"
         )
+
+        print(f"[Device {self.client_id}] Confusion matrix:")
+        print(cm)

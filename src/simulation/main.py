@@ -8,12 +8,13 @@ Swapping between model architectures
 -------------------------------------
 Change the two constants below and rerun.  Nothing else needs to change.
 
-    MODEL_TYPE  = "vanilla"   →  Dense autoencoder,   flat input
-    MODEL_TYPE  = "lstm"      →  LSTM autoencoder,     sequence input
-    MODEL_TYPE  = "conv1d"    →  Conv1D autoencoder,   sequence input
+    MODEL_TYPE  = "vanilla"     →  Dense autoencoder,        flat input
+    MODEL_TYPE  = "lstm"        →  LSTM autoencoder,          sequence input
+    MODEL_TYPE  = "conv1d"      →  Conv1D autoencoder,        sequence input
+    MODEL_TYPE  = "transformer" →  Transformer autoencoder,   sequence input
 
-    WINDOW_SIZE = None        →  required for "vanilla"
-    WINDOW_SIZE = 30          →  required for "lstm" and "conv1d"
+    WINDOW_SIZE = None          →  required for "vanilla"
+    WINDOW_SIZE = 30            →  required for "lstm", "conv1d", and "transformer"
 
 Run from this directory
 -----------------------
@@ -35,7 +36,7 @@ import os
 # ---------------------------------------------------------------------------
 
 
-MODEL_TYPE  = "lstm"  # "vanilla" | "lstm" | "conv1d"
+MODEL_TYPE  = "lstm"  # "vanilla" | "lstm" | "conv1d" | "transformer"
 WINDOW_SIZE = 30       # None for vanilla; e.g. 30 for lstm / conv1d
 
 NUM_ROUNDS    = 3   # federated communication rounds

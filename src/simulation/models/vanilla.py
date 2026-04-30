@@ -1,6 +1,7 @@
 """
 vanilla.py
 ----------
+
 Dense (fully-connected) autoencoder for tabular anomaly detection.
 
 Architecture
@@ -17,11 +18,13 @@ Output shape : (batch_size, n_features)
 Loss         : Mean Squared Error (MSE)
 """
 
+
 from keras import Input, Model
 from keras import layers
 
 
 def build_vanilla(input_dim: int, latent_dim: int = 16) -> Model:
+
     """Build and compile a vanilla dense autoencoder.
 
     Parameters
@@ -42,6 +45,7 @@ def build_vanilla(input_dim: int, latent_dim: int = 16) -> Model:
         - Optimizer   : Adam (default learning rate)
         - Loss        : Mean Squared Error
     """
+
     inputs = Input(shape=(input_dim,), name="input")
 
     # --- Encoder ---
@@ -56,4 +60,5 @@ def build_vanilla(input_dim: int, latent_dim: int = 16) -> Model:
 
     model = Model(inputs, outputs, name="vanilla_autoencoder")
     model.compile(optimizer="adam", loss="mse")
+    
     return model

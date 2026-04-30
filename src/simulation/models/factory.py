@@ -1,6 +1,7 @@
 """
 factory.py
 ----------
+
 Single entry point for model instantiation.
 
 Changing ``MODEL_TYPE`` in ``main.py`` is the *only* change needed to switch
@@ -15,11 +16,11 @@ Supported model types
 - ``"conv1d"``  : 1-D Conv autoencoder.  Requires ``window_size``.
 """
 
-from keras import Model
 
 from .vanilla import build_vanilla
-from .lstm import build_lstm
 from .conv1d import build_conv1d
+from .lstm import build_lstm
+from keras import Model
 
 
 AVAILABLE_MODELS = ("vanilla", "lstm", "conv1d")
@@ -30,6 +31,7 @@ def build_model(
     input_dim: int,
     window_size: int | None = None,
 ) -> Model:
+    
     """Instantiate and compile a Keras autoencoder by name.
 
     Parameters
@@ -62,6 +64,7 @@ def build_model(
     >>> model = build_model("lstm",    input_dim=64, window_size=30)
     >>> model = build_model("conv1d",  input_dim=64, window_size=30)
     """
+    
     if model_type == "vanilla":
         return build_vanilla(input_dim)
 

@@ -1,6 +1,7 @@
 """
 lstm.py
 -------
+
 LSTM sequence autoencoder for time-series anomaly detection.
 
 Architecture
@@ -24,11 +25,13 @@ Output shape : (batch_size, window_size, n_features)
 Loss         : Mean Squared Error (MSE) over every time step and feature.
 """
 
+
 from keras import Input, Model
 from keras import layers
 
 
 def build_lstm(input_dim: int, window_size: int, latent_dim: int = 32) -> Model:
+
     """Build and compile an LSTM sequence autoencoder.
 
     Parameters
@@ -51,6 +54,7 @@ def build_lstm(input_dim: int, window_size: int, latent_dim: int = 32) -> Model:
         - Optimizer   : Adam (default learning rate)
         - Loss        : Mean Squared Error
     """
+
     inputs = Input(shape=(window_size, input_dim), name="input")
 
     # --- Encoder ---
@@ -70,4 +74,5 @@ def build_lstm(input_dim: int, window_size: int, latent_dim: int = 32) -> Model:
 
     model = Model(inputs, outputs, name="lstm_autoencoder")
     model.compile(optimizer="adam", loss="mse")
+    
     return model

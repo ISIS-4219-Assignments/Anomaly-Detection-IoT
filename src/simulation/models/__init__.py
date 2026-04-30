@@ -1,6 +1,7 @@
 """
 models/
 -------
+
 Keras autoencoder definitions for the IoT anomaly detection simulation.
 
 Available architectures

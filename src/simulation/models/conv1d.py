@@ -1,11 +1,12 @@
 """
 conv1d.py
 ---------
+
 1-D convolutional autoencoder for time-series anomaly detection.
 
 Architecture
 ------------
-Input  (batch, window, features)
+  → Input   (batch, window, features)
   → Encoder : Conv1D(32, k=3, same, relu)
               Conv1D(16, k=3, same, relu)
               GlobalAveragePooling1D             ← pools time axis → (batch, 16)
@@ -27,11 +28,13 @@ Output shape : (batch_size, window_size, n_features)
 Loss         : Mean Squared Error (MSE) over every time step and feature.
 """
 
+
 from keras import Input, Model
 from keras import layers
 
 
 def build_conv1d(input_dim: int, window_size: int, latent_dim: int = 32) -> Model:
+
     """Build and compile a 1-D convolutional autoencoder.
 
     Parameters
@@ -63,6 +66,7 @@ def build_conv1d(input_dim: int, window_size: int, latent_dim: int = 32) -> Mode
     The decoder's Dense layer projects back to ``window_size * 16`` units and
     reshapes to ``(window_size, 16)`` before the decoder Conv1D layers.
     """
+
     inputs = Input(shape=(window_size, input_dim), name="input")
 
     # --- Encoder ---
@@ -82,4 +86,5 @@ def build_conv1d(input_dim: int, window_size: int, latent_dim: int = 32) -> Mode
 
     model = Model(inputs, outputs, name="conv1d_autoencoder")
     model.compile(optimizer="adam", loss="mse")
+    
     return model

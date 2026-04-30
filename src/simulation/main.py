@@ -25,6 +25,7 @@ Run from this directory
 from preprocessor import IoTPreprocessor, build_global_categories
 from device import SimulatedDevice
 from server import CentralServer
+from pathlib import Path
 import pandas as pd
 import os
 
@@ -49,11 +50,17 @@ DEVICE_NAMES = [
     "phValue",
 ]
 
-# Path to the splits root, relative to this file's directory (src/simulation/).
-SPLITS_DIR = os.path.join("..", "..", "data", "splits")
+# Absolute dir of src/simulation/
+BASE_DIR = Path(__file__).resolve().parent
 
-# Directory where the final global model will be saved (src/models/).
-MODELS_DIR = os.path.join("..", "models")
+# Project Root dir
+PROJECT_ROOT = BASE_DIR.parent.parent
+
+# data/splits
+SPLITS_DIR = PROJECT_ROOT / "data" / "splits"
+
+# src/models
+MODELS_DIR = PROJECT_ROOT / "src" / "models"
 
 
 # ---------------------------------------------------------------------------

@@ -340,7 +340,13 @@ class IoTPreprocessor:
         numeric_cols = [c for c in df.columns if c not in skip]
         df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors = "coerce")
 
-        df = df.dropna()
+        # Fill nulls with 0 rather than dropping rows.  Protocol-specific
+        # fields (icmp.checksum, mqtt.hdrflags, etc.) are null when that
+        # protocol is absent from a packet — 0 is the correct representation
+        # and keeps rows like DDoS_ICMP in the dataset instead of silently
+        # discarding them.
+        numeric_cols_all = [c for c in df.columns if c not in set(TARGET_COLS) | set(CATEGORICAL_COLS)]
+        df[numeric_cols_all] = df[numeric_cols_all].fillna(0)
         df = df.drop_duplicates()
         return df.reset_index(drop = True)
 

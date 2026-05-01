@@ -26,10 +26,14 @@ Run from this directory
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # suppress XLA/TF C++ info logs
 
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix
 from preprocessor import IoTPreprocessor, build_global_categories
+from models.factory import build_model
+from windowing import create_windows
 from device import SimulatedDevice
 from server import CentralServer
 from pathlib import Path
+import numpy as np
 import pandas as pd
 import threading
 import os
@@ -40,8 +44,8 @@ import os
 # ---------------------------------------------------------------------------
 
 
-MODEL_TYPE  = "conv1d"  # "vanilla" | "lstm" | "conv1d" | "transformer"
-WINDOW_SIZE = 30       # None for vanilla; e.g. 30 for lstm / conv1d
+MODEL_TYPE  = "vanilla"  # "vanilla" | "lstm" | "conv1d" | "transformer"
+WINDOW_SIZE = None       # None for vanilla; e.g. 30 for lstm / conv1d
 
 NUM_ROUNDS    = 7   # federated communication rounds
 LOCAL_EPOCHS  = 15   # local training epochs per round per device (max)
@@ -70,6 +74,9 @@ MODELS_DIR = PROJECT_ROOT / "src" / "models"
 
 # results/
 RESULTS_DIR = PROJECT_ROOT / "results"
+
+# data/splits/general_test.csv  (built by src/utils/prepare_general_test.py)
+GENERAL_TEST_PATH = SPLITS_DIR / "general_test.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +132,205 @@ def _compute_input_dim(train_path: str, known_categories: dict) -> int:
     pre = IoTPreprocessor(known_categories = known_categories)
     X, _ = pre.fit_transform(pd.read_csv(train_path, low_memory = False))
     return X.shape[1]
+
+
+# ---------------------------------------------------------------------------
+# Global evaluation
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_global_test(
+    global_weights: list,
+    all_train_paths: list[str],
+    all_val_paths: list[str],
+    known_categories: dict,
+    model_type: str,
+    input_dim: int,
+    window_size: int | None,
+    general_test_path: str,
+    results_dir,
+    gpu_lock: threading.Lock | None = None,
+) -> None:
+
+    """Evaluate the final global model on the general test set.
+
+    Fits a new :class:`~preprocessor.IoTPreprocessor` on pooled training data
+    from all devices (giving a global scaler), derives the anomaly threshold
+    from the 99th percentile of pooled validation reconstruction errors, then
+    runs inference on ``general_test_path``.
+
+    Reports overall AUROC / Precision / Recall / F1 and a per-attack-type
+    recall breakdown.  Saves a text report to
+    ``<results_dir>/<model_type>_global_report.txt``.
+
+    Skips gracefully if ``general_test_path`` does not exist, printing a
+    reminder to run ``prepare_general_test.py`` first.
+
+    Parameters
+    ----------
+    global_weights : list[np.ndarray]
+        Final global model weights from the server.
+    all_train_paths : list[str]
+        Training CSV paths for every device (used to fit the global scaler).
+    all_val_paths : list[str]
+        Validation CSV paths for every device (used to compute the threshold).
+    known_categories : dict[str, list]
+        Global categorical vocabulary built before training.
+    model_type : str
+        Architecture name — one of ``"vanilla"``, ``"lstm"``, ``"conv1d"``,
+        ``"transformer"``.
+    input_dim : int
+        Feature dimension after preprocessing.
+    window_size : int or None
+        Sliding-window size; ``None`` for the vanilla model.
+    general_test_path : str
+        Path to the general test CSV produced by ``prepare_general_test.py``.
+    results_dir : Path or str or None
+        Directory where the report will be written.  Skips saving if ``None``.
+    gpu_lock : threading.Lock or None
+        Shared lock used to serialise Keras inference across threads.
+    """
+
+    if not os.path.isfile(general_test_path):
+        print(
+            f"\n[Global Eval] General test file not found: {general_test_path}\n"
+            "[Global Eval] Run  python src/utils/prepare_general_test.py  first."
+        )
+        return
+
+    # --- Fit a global preprocessor on pooled training data ---
+    print("\n[Global Eval] Fitting global preprocessor on pooled training data...")
+    pooled_train = pd.concat(
+        [pd.read_csv(p, low_memory=False) for p in all_train_paths],
+        ignore_index=True,
+    )
+    pre = IoTPreprocessor(known_categories=known_categories)
+    pre.fit_transform(pooled_train)
+
+    # --- Compute threshold from pooled validation errors ---
+    print("[Global Eval] Computing threshold from pooled validation data...")
+    val_arrays = [
+        pre.transform(pd.read_csv(p, low_memory=False))[0].values.astype("float32")
+        for p in all_val_paths
+    ]
+    X_val = np.concatenate(val_arrays, axis=0)
+    if window_size is not None:
+        X_val = create_windows(X_val, window_size)
+
+    lock  = gpu_lock or threading.Lock()
+    model = build_model(model_type, input_dim, window_size)
+    model.set_weights(global_weights)
+
+    with lock:
+        X_val_pred = model.predict(X_val, batch_size=256, verbose=0)
+
+    axes       = tuple(range(1, X_val.ndim))
+    val_errors = np.mean((X_val - X_val_pred) ** 2, axis=axes)
+    threshold  = float(np.percentile(val_errors, 99))
+    print(f"[Global Eval] Threshold: {threshold:.6f}")
+
+    # --- Evaluate on general test set ---
+    print("[Global Eval] Evaluating on general test set...")
+    test_df              = pd.read_csv(general_test_path, low_memory=False)
+    X_test, y_test_df   = pre.transform(test_df)
+    X_test               = X_test.values.astype("float32")
+    y_labels             = y_test_df["Attack_label"].values
+    attack_types         = (y_test_df["Attack_type"].values
+                            if "Attack_type" in y_test_df.columns else None)
+
+    if window_size is not None:
+        X_test       = create_windows(X_test, window_size)
+        y_labels     = y_labels[window_size - 1:]
+        if attack_types is not None:
+            attack_types = attack_types[window_size - 1:]
+
+    with lock:
+        X_pred = model.predict(X_test, batch_size=256, verbose=0)
+
+    axes   = tuple(range(1, X_test.ndim))
+    errors = np.mean((X_test - X_pred) ** 2, axis=axes)
+    y_pred = (errors > threshold).astype(int)
+
+    normal_mask = y_labels == 0
+    attack_mask = y_labels == 1
+
+    normal_mse  = float(np.median(errors[normal_mask])) if normal_mask.any() else float("nan")
+    attack_mse  = float(np.median(errors[attack_mask])) if attack_mask.any() else float("nan")
+    precision   = precision_score(y_labels, y_pred, zero_division=0)
+    recall_val  = recall_score(y_labels, y_pred, zero_division=0)
+    f1          = f1_score(y_labels, y_pred, zero_division=0)
+    cm          = confusion_matrix(y_labels, y_pred)
+    auroc       = (roc_auc_score(y_labels, errors)
+                   if normal_mask.any() and attack_mask.any() else float("nan"))
+
+    print(
+        f"[Global Eval] AUROC: {auroc:.4f} | Precision: {precision:.4f} | "
+        f"Recall: {recall_val:.4f} | F1: {f1:.4f}"
+    )
+
+    # --- Per-attack-type breakdown ---
+    # Each type is evaluated against all normal samples (one-vs-normal):
+    # "can the model distinguish normal traffic from this specific attack?"
+    per_type_lines = []
+    if attack_types is not None:
+        header = (
+            f"  {'Attack Type':<40} {'AUROC':>7} {'Precision':>10} "
+            f"{'Recall':>7} {'F1':>7} {'Median MSE':>14} {'TP':>7} {'FN':>7} {'n':>7}"
+        )
+        separator = "  " + "-" * (len(header) - 2)
+        per_type_lines += [header, separator]
+
+        for atype in sorted(set(attack_types[attack_mask]) if attack_mask.any() else []):
+            atk_mask = attack_types == atype
+            sub      = atk_mask | normal_mask      # this attack type + all normal rows
+            y_sub    = y_labels[sub]
+            pred_sub = y_pred[sub]
+            err_sub  = errors[sub]
+
+            prec_t  = precision_score(y_sub, pred_sub, zero_division=0)
+            rec_t   = recall_score(y_sub, pred_sub, zero_division=0)
+            f1_t    = f1_score(y_sub, pred_sub, zero_division=0)
+            auroc_t = (roc_auc_score(y_sub, err_sub)
+                       if y_sub.sum() > 0 and (y_sub == 0).any() else float("nan"))
+            med_mse = float(np.median(errors[atk_mask]))
+            tp_t    = int(np.sum(pred_sub[y_sub == 1] == 1))
+            fn_t    = int(np.sum(pred_sub[y_sub == 1] == 0))
+            n_t     = int(atk_mask.sum())
+
+            per_type_lines.append(
+                f"  {atype:<40} {auroc_t:>7.4f} {prec_t:>10.4f} "
+                f"{rec_t:>7.4f} {f1_t:>7.4f} {med_mse:>14.4f} {tp_t:>7} {fn_t:>7} {n_t:>7}"
+            )
+
+    # --- Save report ---
+    if results_dir is not None:
+        os.makedirs(results_dir, exist_ok=True)
+        cm_block = (
+            f"  TN={cm[0,0]}  FP={cm[0,1]}\n"
+            f"  FN={cm[1,0]}  TP={cm[1,1]}"
+        )
+        lines = [
+            "=== Global Generalisation Evaluation ===",
+            f"Architecture:      {model_type}",
+            f"Threshold:         {threshold:.6f}",
+            f"AUROC:             {auroc:.4f}",
+            f"Precision:         {precision:.4f}",
+            f"Recall:            {recall_val:.4f}",
+            f"F1 Score:          {f1:.4f}",
+            f"Normal Median MSE: {normal_mse:.6f}",
+            f"Attack Median MSE: {attack_mse:.6f}",
+            "",
+            "Confusion Matrix:",
+            "  (rows=actual, cols=predicted)",
+            cm_block,
+        ]
+        if per_type_lines:
+            lines += ["", "Per-Attack-Type Metrics (each type evaluated against all normal traffic):"] + per_type_lines
+
+        report_path = os.path.join(results_dir, f"{model_type}_global_report.txt")
+        with open(report_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        print(f"[Global Eval] Report saved → {report_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +406,20 @@ def main() -> None:
         device.join()
 
     print("\nAll threads closed.")
+
+    # --- Step 6: global generalisation evaluation ---
+    _evaluate_global_test(
+        global_weights    = server.global_model,
+        all_train_paths   = all_train_paths,
+        all_val_paths     = [p["val"] for p in all_paths],
+        known_categories  = known_categories,
+        model_type        = MODEL_TYPE,
+        input_dim         = input_dim,
+        window_size       = WINDOW_SIZE,
+        general_test_path = str(GENERAL_TEST_PATH),
+        results_dir       = str(RESULTS_DIR),
+        gpu_lock          = gpu_lock,
+    )
 
     # Save the final global model to src/models/
     server.save_global_model(MODELS_DIR)

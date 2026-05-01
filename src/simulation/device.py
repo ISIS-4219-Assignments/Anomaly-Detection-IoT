@@ -301,18 +301,20 @@ class SimulatedDevice(threading.Thread):
         dict
             Dictionary with the following keys:
 
-            - **threshold** — the decision boundary used.
             - **auroc** — area under the ROC curve (threshold-free; 1.0 is
               perfect, 0.5 is random).
             - **prauc** — area under the precision-recall curve.
-            - **accuracy** — fraction of correctly classified samples.
-            - **bal_acc** — balanced accuracy (average of per-class recall).
             - **precision** — fraction of predicted attacks that are real attacks.
             - **recall** — fraction of real attacks correctly detected.
-            - **f1** — harmonic mean of precision and recall.
-            - **normal_mse** — median reconstruction error on normal samples.
-            - **attack_mse** — median reconstruction error on attack samples.
-              A well-trained detector produces a clearly higher value here.
+            - **bal_acc** — balanced accuracy (average of per-class recall).
+            - **f1_bal** — F1 score on a 1:1 balanced subset of normal and
+              attack samples.
+            - **attack_mse** — median reconstruction error on attack samples
+              (Median MSE); a well-trained detector produces a clearly higher
+              value here than on normal samples.
+            - **tp** — number of correctly detected attacks.
+            - **fn** — number of missed attacks.
+            - **n** — total number of test samples.
             - **confusion_matrix** — 2×2 ``np.ndarray`` (rows=actual,
               cols=predicted).
         """
@@ -347,12 +349,9 @@ class SimulatedDevice(threading.Thread):
         normal_mask = y_test == 0
         attack_mask = y_test == 1
 
-        normal_mse = float(np.median(errors[normal_mask])) if normal_mask.any() else float("nan")
         attack_mse = float(np.median(errors[attack_mask])) if attack_mask.any() else float("nan")
-        accuracy  = accuracy_score(y_test, y_pred)
         precision = precision_score(y_test, y_pred, zero_division = 0)
         recall = recall_score(y_test, y_pred, zero_division = 0)
-        f1 = f1_score(y_test, y_pred, zero_division = 0)
         cm = confusion_matrix(y_test, y_pred)
 
         if normal_mask.any() and attack_mask.any():
@@ -362,32 +361,46 @@ class SimulatedDevice(threading.Thread):
         else:
             auroc = prauc = bal_acc = float("nan")
 
+        tp = int(cm[1, 1])
+        fn = int(cm[1, 0])
+        n  = len(y_test)
+
+        rng_d        = np.random.default_rng(42)
+        attack_idx_d = np.where(attack_mask)[0]
+        normal_idx_d = np.where(normal_mask)[0]
+        if attack_mask.any() and normal_mask.any():
+            bal_size  = min(len(attack_idx_d), len(normal_idx_d))
+            bal_idx_d = np.concatenate([
+                attack_idx_d,
+                rng_d.choice(normal_idx_d, size=bal_size, replace=False),
+            ])
+            f1_bal = f1_score(y_test[bal_idx_d], y_pred[bal_idx_d], zero_division=0)
+        else:
+            f1_bal = float("nan")
+
         print(
             f"[Device {self.client_id}] Test results — "
-            f"Threshold: {threshold:.6f} | "
             f"AUROC: {auroc:.4f} | PR-AUC: {prauc:.4f} | "
-            f"Accuracy: {accuracy:.4f} | Bal-Acc: {bal_acc:.4f} | "
-            f"Precision: {precision:.4f} | "
-            f"Recall: {recall:.4f} | "
-            f"F1: {f1:.4f} | "
-            f"normal_median_mse: {normal_mse:.6f} | "
-            f"attack_median_mse: {attack_mse:.6f}"
+            f"Precision: {precision:.4f} | Recall: {recall:.4f} | "
+            f"Acc(bal): {bal_acc:.4f} | F1(bal): {f1_bal:.4f} | "
+            f"Median MSE: {attack_mse:.6f} | "
+            f"TP: {tp} | FN: {fn} | n: {n}"
         )
 
         print(f"[Device {self.client_id}] Confusion matrix:")
         print(cm)
 
         return {
-            "threshold":        threshold,
             "auroc":            auroc,
             "prauc":            prauc,
-            "accuracy":         accuracy,
-            "bal_acc":          bal_acc,
             "precision":        precision,
             "recall":           recall,
-            "f1":               f1,
-            "normal_mse":       normal_mse,
+            "bal_acc":          bal_acc,
+            "f1_bal":           f1_bal,
             "attack_mse":       attack_mse,
+            "tp":               tp,
+            "fn":               fn,
+            "n":                n,
             "confusion_matrix": cm,
         }
 
@@ -425,16 +438,16 @@ class SimulatedDevice(threading.Thread):
             f"Total epochs:  {len(self._train_losses)}\n"
             f"\n"
             f"=== Evaluation Results ===\n"
-            f"Threshold:         {metrics['threshold']:.6f}\n"
-            f"AUROC:             {metrics['auroc']:.4f}\n"
-            f"PR-AUC:            {metrics['prauc']:.4f}\n"
-            f"Accuracy:          {metrics['accuracy']:.4f}\n"
-            f"Balanced Accuracy: {metrics['bal_acc']:.4f}\n"
-            f"Precision:         {metrics['precision']:.4f}\n"
-            f"Recall:            {metrics['recall']:.4f}\n"
-            f"F1 Score:          {metrics['f1']:.4f}\n"
-            f"Normal Median MSE: {metrics['normal_mse']:.6f}\n"
-            f"Attack Median MSE: {metrics['attack_mse']:.6f}\n"
+            f"AUROC:      {metrics['auroc']:.4f}\n"
+            f"PR-AUC:     {metrics['prauc']:.4f}\n"
+            f"Precision:  {metrics['precision']:.4f}\n"
+            f"Recall:     {metrics['recall']:.4f}\n"
+            f"Acc(bal):   {metrics['bal_acc']:.4f}\n"
+            f"F1(bal):    {metrics['f1_bal']:.4f}\n"
+            f"Median MSE: {metrics['attack_mse']:.6f}\n"
+            f"TP:         {metrics['tp']}\n"
+            f"FN:         {metrics['fn']}\n"
+            f"n:          {metrics['n']}\n"
             f"\n"
             f"Confusion Matrix:\n"
             f"  (rows=actual, cols=predicted)\n"

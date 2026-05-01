@@ -273,17 +273,34 @@ def _evaluate_global_test(
                    if normal_mask.any() and attack_mask.any() else float("nan"))
     bal_acc     = balanced_accuracy_score(y_labels, y_pred)
 
+    tp_g = int(cm[1, 1])
+    fn_g = int(cm[1, 0])
+    n_g  = len(y_labels)
+    rng_g        = np.random.default_rng(42)
+    attack_idx_g = np.where(attack_mask)[0]
+    normal_idx_g = np.where(normal_mask)[0]
+    if attack_mask.any() and normal_mask.any():
+        bal_size_g = min(len(attack_idx_g), len(normal_idx_g))
+        bal_idx_g  = np.concatenate([
+            attack_idx_g,
+            rng_g.choice(normal_idx_g, size=bal_size_g, replace=False),
+        ])
+        f1_bal_g = f1_score(y_labels[bal_idx_g], y_pred[bal_idx_g], zero_division=0)
+    else:
+        f1_bal_g = float("nan")
+
     print(
         f"[Global Eval] AUROC: {auroc:.4f} | PR-AUC: {prauc:.4f} | "
-        f"Accuracy: {accuracy:.4f} | Bal-Acc: {bal_acc:.4f} | "
-        f"Recall: {recall_val:.4f} | F1: {f1:.4f}"
+        f"Precision: {precision:.4f} | Recall: {recall_val:.4f} | "
+        f"Acc(bal): {bal_acc:.4f} | F1(bal): {f1_bal_g:.4f} | "
+        f"Median MSE: {attack_mse:.6f} | "
+        f"TP: {tp_g} | FN: {fn_g} | n: {n_g}"
     )
 
     # --- Per-attack-type breakdown ---
     # Threshold-free metrics (AUROC, PR-AUC): computed on all normal rows + attack type.
-    # Threshold-based metrics (Recall, F1): Recall uses the full attack set; F1 uses a
-    # 1:1 balanced subset (equal normal rows sampled per attack type) so that precision
-    # is not artificially deflated by the 200K-normal-vs-79-attack imbalance.
+    # Threshold-based metrics (Precision, Recall, Acc(bal), F1(bal)): computed on a 1:1
+    # balanced subset (equal attack and sampled normal rows) to avoid class-imbalance bias.
     rng = np.random.default_rng(42)
     normal_idx = np.where(normal_mask)[0]
 
@@ -291,7 +308,7 @@ def _evaluate_global_test(
     if attack_types is not None:
         header = (
             f"  {'Attack Type':<40} {'AUROC':>7} {'PR-AUC':>7} "
-            f"{'Acc':>7} {'Acc(bal)':>9} {'Recall':>7} {'F1(bal)':>8} {'Median MSE':>14} {'TP':>7} {'FN':>7} {'n':>7}"
+            f"{'Precision':>10} {'Recall':>7} {'Acc(bal)':>9} {'F1(bal)':>8} {'Median MSE':>14} {'TP':>7} {'FN':>7} {'n':>7}"
         )
         separator = "  " + "-" * (len(header) - 2)
         per_type_lines += [header, separator]
@@ -310,16 +327,16 @@ def _evaluate_global_test(
                         if y_sub.sum() > 0 and (y_sub == 0).any() else float("nan"))
             prauc_t  = (average_precision_score(y_sub, err_sub)
                         if y_sub.sum() > 0 and (y_sub == 0).any() else float("nan"))
-            acc_full_t = accuracy_score(y_sub, pred_sub)
 
             # threshold-based metrics — balanced 1:1 subset
-            bal_normal = rng.choice(normal_idx, size=min(n_t, len(normal_idx)), replace=False)
-            bal_idx    = np.concatenate([atk_idx, bal_normal])
-            y_bal      = y_labels[bal_idx]
-            pred_bal   = y_pred[bal_idx]
-            acc_t  = accuracy_score(y_bal, pred_bal)
-            rec_t  = recall_score(y_bal, pred_bal, zero_division=0)
-            f1_t   = f1_score(y_bal, pred_bal, zero_division=0)
+            bal_normal  = rng.choice(normal_idx, size=min(n_t, len(normal_idx)), replace=False)
+            bal_idx     = np.concatenate([atk_idx, bal_normal])
+            y_bal       = y_labels[bal_idx]
+            pred_bal    = y_pred[bal_idx]
+            precision_t = precision_score(y_bal, pred_bal, zero_division=0)
+            rec_t       = recall_score(y_bal, pred_bal, zero_division=0)
+            acc_t       = accuracy_score(y_bal, pred_bal)
+            f1_t        = f1_score(y_bal, pred_bal, zero_division=0)
 
             tp_t    = int(np.sum(y_pred[atk_idx] == 1))
             fn_t    = int(np.sum(y_pred[atk_idx] == 0))
@@ -327,10 +344,10 @@ def _evaluate_global_test(
 
             per_type_lines.append(
                 f"  {atype:<40} {auroc_t:>7.4f} {prauc_t:>7.4f} "
-                f"{acc_full_t:>7.4f} {acc_t:>9.4f} {rec_t:>7.4f} {f1_t:>8.4f} {med_mse:>14.4f} {tp_t:>7} {fn_t:>7} {n_t:>7}"
+                f"{precision_t:>10.4f} {rec_t:>7.4f} {acc_t:>9.4f} {f1_t:>8.4f} {med_mse:>14.4f} {tp_t:>7} {fn_t:>7} {n_t:>7}"
             )
         per_type_lines.append(
-            "  * Acc(bal) and F1(bal) computed on a 1:1 balanced subset (n attack rows : n sampled normal rows)"
+            "  * Precision, Acc(bal), and F1(bal) computed on a 1:1 balanced subset (n attack rows : n sampled normal rows)"
         )
 
     # --- Save report ---
@@ -342,17 +359,17 @@ def _evaluate_global_test(
         )
         lines = [
             "=== Global Generalisation Evaluation ===",
-            f"Architecture:      {model_type}",
-            f"Threshold:         {threshold:.6f}",
-            f"AUROC:             {auroc:.4f}",
-            f"PR-AUC:            {prauc:.4f}",
-            f"Accuracy:          {accuracy:.4f}",
-            f"Balanced Accuracy: {bal_acc:.4f}",
-            f"Precision:         {precision:.4f}",
-            f"Recall:            {recall_val:.4f}",
-            f"F1 Score:          {f1:.4f}",
-            f"Normal Median MSE: {normal_mse:.6f}",
-            f"Attack Median MSE: {attack_mse:.6f}",
+            f"Architecture:  {model_type}",
+            f"AUROC:         {auroc:.4f}",
+            f"PR-AUC:        {prauc:.4f}",
+            f"Precision:     {precision:.4f}",
+            f"Recall:        {recall_val:.4f}",
+            f"Acc(bal):      {bal_acc:.4f}",
+            f"F1(bal):       {f1_bal_g:.4f}",
+            f"Median MSE:    {attack_mse:.6f}",
+            f"TP:            {tp_g}",
+            f"FN:            {fn_g}",
+            f"n:             {n_g}",
             "",
             "Confusion Matrix:",
             "  (rows=actual, cols=predicted)",

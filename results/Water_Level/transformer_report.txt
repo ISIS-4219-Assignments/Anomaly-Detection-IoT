@@ -1,0 +1,24 @@
+Device:        Water_Level
+Architecture:  transformer
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  66
+
+=== Evaluation Results ===
+Threshold:      0.0000
+AUROC:      0.5000
+PR-AUC:     0.0037
+Precision:  0.0000
+Recall:     0.0000
+Acc(bal):   0.5000
+F1(bal):    0.0000
+Normal Median MSE: 0.000000
+Attack Median MSE: 0.000000
+TP:         0
+FN:         169
+n:          45727
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=45558  FP=0
+  FN=169  TP=0

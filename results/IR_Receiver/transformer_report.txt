@@ -1,0 +1,24 @@
+Device:        IR_Receiver
+Architecture:  transformer
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  72
+
+=== Evaluation Results ===
+Threshold:      0.0000
+AUROC:      0.9997
+PR-AUC:     0.9997
+Precision:  1.0000
+Recall:     0.9995
+Acc(bal):   0.9997
+F1(bal):    0.9997
+Normal Median MSE: 0.000000
+Attack Median MSE: 0.000000
+TP:         17036
+FN:         9
+n:          43108
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=26063  FP=0
+  FN=9  TP=17036

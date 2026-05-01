@@ -1,0 +1,24 @@
+Device:        Sound_Sensor
+Architecture:  transformer
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  60
+
+=== Evaluation Results ===
+Threshold:      0.0000
+AUROC:      0.9996
+PR-AUC:     0.9996
+Precision:  1.0000
+Recall:     0.9991
+Acc(bal):   0.9996
+F1(bal):    0.9996
+Normal Median MSE: 0.000000
+Attack Median MSE: 0.000000
+TP:         30274
+FN:         26
+n:          60557
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=30257  FP=0
+  FN=26  TP=30274

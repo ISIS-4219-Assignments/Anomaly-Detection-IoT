@@ -1,0 +1,24 @@
+Device:        Temperature_and_Humidity
+Architecture:  transformer
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  28
+
+=== Evaluation Results ===
+Threshold:      0.0000
+AUROC:      0.9987
+PR-AUC:     0.9981
+Precision:  0.2744
+Recall:     1.0000
+Acc(bal):   0.5000
+F1(bal):    0.6667
+Normal Median MSE: 0.000000
+Attack Median MSE: 0.000019
+TP:         12527
+FN:         0
+n:          45651
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=0  FP=33124
+  FN=0  TP=12527

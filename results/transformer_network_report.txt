@@ -1,0 +1,19 @@
+=== Network-Level Device Metrics ===
+Architecture:              transformer
+Devices:                   8
+Total samples:             348865
+Weighted Threshold:        0.000000
+Weighted AUROC:            0.9334
+Weighted PR-AUC:           0.8682
+Accuracy:                  0.9037
+Balanced Accuracy:         0.9215
+Precision:                 0.8000
+Recall:                    0.9965
+F1 Score:                  0.8875
+Weighted Normal Median MSE:0.000000
+Weighted Attack Median MSE:0.000004
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=182763  FP=33124
+  FN=463  TP=132515

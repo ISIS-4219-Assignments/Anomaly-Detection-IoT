@@ -1,0 +1,24 @@
+Device:        Flame_Sensor
+Architecture:  transformer
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  84
+
+=== Evaluation Results ===
+Threshold:      0.0000
+AUROC:      0.9993
+PR-AUC:     0.9992
+Precision:  1.0000
+Recall:     0.9986
+Acc(bal):   0.9993
+F1(bal):    0.9993
+Normal Median MSE: 0.000000
+Attack Median MSE: 0.000002
+TP:         14929
+FN:         21
+n:          36184
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=21234  FP=0
+  FN=21  TP=14929

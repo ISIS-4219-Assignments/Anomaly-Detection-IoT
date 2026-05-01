@@ -47,11 +47,11 @@ import os
 # ---------------------------------------------------------------------------
 
 
-MODEL_TYPE  = "vanilla"  # "vanilla" | "lstm" | "conv1d" | "transformer"
-WINDOW_SIZE = None       # None for vanilla; e.g. 30 for lstm / conv1d / transformer
+MODEL_TYPE  = "lstm"  # "vanilla" | "lstm" | "conv1d" | "transformer"
+WINDOW_SIZE = 30       # None for vanilla; e.g. 30 for lstm / conv1d / transformer
 
-NUM_ROUNDS    = 3   # federated communication rounds
-LOCAL_EPOCHS  = 5   # local training epochs per round per device (max)
+NUM_ROUNDS    = 7   # federated communication rounds
+LOCAL_EPOCHS  =  20  # local training epochs per round per device (max)
 EARLY_STOPPING_PATIENCE = 3  # stop early if val_loss stalls; 0 to disable
 
 # Devices whose splits will participate in this run.
@@ -245,10 +245,17 @@ def _evaluate_global_test(
                             if "Attack_type" in y_test_df.columns else None)
 
     if window_size is not None:
-        X_test       = create_windows(X_test, window_size)
-        y_labels     = y_labels[window_size - 1:]
+        X_test = create_windows(X_test, window_size)
+        n_windows = len(y_labels) - window_size + 1
+        label_wins = np.lib.stride_tricks.sliding_window_view(y_labels, window_size)
         if attack_types is not None:
-            attack_types = attack_types[window_size - 1:]
+            at_wins = np.array([attack_types[i:i+window_size] for i in range(n_windows)])
+            attack_types = np.array([
+                at_wins[i][np.where(label_wins[i] == 1)[0][-1]]
+                if (label_wins[i] == 1).any() else at_wins[i][-1]
+                for i in range(n_windows)
+            ])
+        y_labels = label_wins.max(axis=1)
 
     with lock:
         X_pred = model.predict(X_test, batch_size=256, verbose=0)

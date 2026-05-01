@@ -286,8 +286,8 @@ class SimulatedDevice(threading.Thread):
         and attack traffic, the method reports classification metrics using
         ``threshold`` to binarise reconstruction errors into anomaly predictions.
 
-        For windowed models the label assigned to each window is the label
-        of its *last* row (most recent trace in the window).
+        For windowed models a window is labelled attack (1) if **any** row
+        within it is an attack; otherwise it is labelled normal (0).
 
         Parameters
         ----------
@@ -333,8 +333,8 @@ class SimulatedDevice(threading.Thread):
 
         if self.window_size is not None:
             X_test = create_windows(X_test, self.window_size)
-            # Label of a window = label of its last row
-            y_test = y_test[self.window_size - 1:]
+            y_wins = np.lib.stride_tricks.sliding_window_view(y_test, self.window_size)
+            y_test = y_wins.max(axis=1)
 
         # Build model and load final global weights
         model = build_model(self.model_type, self.input_dim, self.window_size)

@@ -175,6 +175,8 @@ data/attack_traffic/
 data/normal_traffic/
 data/splits/*
 
+results/*
+
 # Claude init file
 CLAUDE.md
 

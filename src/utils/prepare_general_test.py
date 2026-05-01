@@ -41,10 +41,11 @@ import pandas as pd
 import os
 
 
-TRAIN_RATIO   = 0.70   # must match prepare_device_splits.py
-VAL_RATIO     = 0.15   # must match prepare_device_splits.py
-CAP_FACTOR    = 0.20   # load only 20 % of each device's rows
-ATTACK_FACTOR = 0.10   # attack rows capped at 10 % of total normal rows
+TRAIN_RATIO         = 0.70   # must match prepare_device_splits.py
+VAL_RATIO           = 0.15   # must match prepare_device_splits.py
+CAP_FACTOR          = 0.20   # load only 20 % of each device's rows
+ATTACK_FACTOR       = 0.10   # total attack rows capped at 10 % of normal rows
+MIN_ROWS_PER_ATTACK = 100    # guaranteed floor per attack type before proportional top-up
 
 NORMAL_DIR  = os.path.join("data", "normal_traffic")
 ATTACK_DIR  = os.path.join("data", "attack_traffic")
@@ -65,12 +66,21 @@ def build_test_set(
     normal_df: pd.DataFrame,
     attack_chunks: list[pd.DataFrame],
     attack_budget: int,
+    min_rows_per_attack: int = MIN_ROWS_PER_ATTACK,
 ) -> pd.DataFrame:
 
-    """Interleave normal segments with (optionally down-sampled) attack chunks.
+    """Interleave normal segments with attack chunks, guaranteeing a minimum
+    row count per attack type so small CSVs (e.g. MITM, OS_Fingerprinting)
+    are not crowded out by large ones (e.g. DDoS_UDP with 3 M rows).
 
-    Identical logic to prepare_device_splits.build_test_set so both files
-    produce structurally equivalent test sets.
+    Sampling strategy
+    -----------------
+    1. Each attack type is guaranteed ``min(len(chunk), min_rows_per_attack)``
+       rows regardless of its original size.
+    2. Any remaining budget after the guarantees is distributed proportionally
+       by original CSV size, so large attack types still get more samples.
+    3. If even the guarantees exceed the budget they are scaled down together
+       rather than any type being dropped entirely.
 
     Pattern: normal_seg_1 | attack_1 | normal_seg_2 | … | attack_n | normal_seg_n+1
     """
@@ -78,12 +88,22 @@ def build_test_set(
     if not attack_chunks:
         return normal_df.reset_index(drop=True)
 
-    total_attack_rows = sum(len(c) for c in attack_chunks)
-    if total_attack_rows > attack_budget:
-        scale   = attack_budget / total_attack_rows
-        sampled = [c.iloc[: max(1, int(len(c) * scale))] for c in attack_chunks]
+    # --- Step 1: floor allocation ---
+    floors = [min(len(c), min_rows_per_attack) for c in attack_chunks]
+    total_floors = sum(floors)
+
+    if total_floors >= attack_budget:
+        # Budget too tight to cover all floors — scale floors down proportionally
+        scale   = attack_budget / total_floors
+        sampled = [c.iloc[: max(1, int(f * scale))] for c, f in zip(attack_chunks, floors)]
     else:
-        sampled = attack_chunks
+        # --- Step 2: distribute remaining budget proportionally by CSV size ---
+        remaining  = attack_budget - total_floors
+        total_orig = sum(len(c) for c in attack_chunks)
+        sampled    = [
+            c.iloc[: min(len(c), f + int((len(c) / total_orig) * remaining))]
+            for c, f in zip(attack_chunks, floors)
+        ]
 
     pool     = normal_df.reset_index(drop=True)
     n        = len(sampled)
@@ -163,8 +183,9 @@ def main():
     attack_names  = list(attack_chunks.keys())
     attack_budget = int(len(normal_df) * ATTACK_FACTOR)
 
-    print(f"Attack budget: {attack_budget:,} rows  ({ATTACK_FACTOR:.0%} × normal rows)")
-    print(f"Attack types : {len(attack_names)}")
+    print(f"Attack budget: {attack_budget:,} rows  ({ATTACK_FACTOR:.0%} × normal rows, "
+          f"min {MIN_ROWS_PER_ATTACK} guaranteed per type)")
+    print(f"Attack types : {len(attack_names)}\n")
 
     general_test = build_test_set(normal_df, attack_list, attack_budget)
 
@@ -175,16 +196,27 @@ def main():
     if "Attack_label" in general_test.columns:
         n_normal = int((general_test["Attack_label"] == 0).sum())
         n_attack = int((general_test["Attack_label"] == 1).sum())
+        # Per-attack row counts in the saved file
+        type_counts = (
+            general_test[general_test["Attack_label"] == 1]["Attack_type"]
+            .value_counts()
+            .sort_index()
+            if "Attack_type" in general_test.columns else None
+        )
     else:
         n_normal = n_attack = "n/a"
+        type_counts = None
 
     col = 72
-    print("\n" + "=" * col)
+    print("=" * col)
     print(f"General test set written to: {OUTPUT_PATH}")
     print(f"  Total rows  : {len(general_test):,}")
     print(f"  Normal rows : {n_normal:,}" if isinstance(n_normal, int) else f"  Normal rows : {n_normal}")
     print(f"  Attack rows : {n_attack:,}" if isinstance(n_attack, int) else f"  Attack rows : {n_attack}")
-    print(f"  Attack types ({len(attack_names)}): {', '.join(attack_names)}")
+    if type_counts is not None:
+        print("\n  Rows per attack type (raw, before preprocessing):")
+        for atype, count in type_counts.items():
+            print(f"    {atype:<40} {count:>8,}")
     print("=" * col)
 
 

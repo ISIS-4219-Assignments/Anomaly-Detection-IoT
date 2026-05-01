@@ -17,13 +17,19 @@ All inter-device communication goes through :class:`~server.CentralServer`.
 """
 
 
-from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import (roc_auc_score, average_precision_score,
+                             accuracy_score, balanced_accuracy_score,
+                             precision_score, recall_score, f1_score,
+                             confusion_matrix)
+
 from keras.callbacks import EarlyStopping
 from preprocessor import IoTPreprocessor
 from models.factory import build_model
 from windowing import create_windows
+
 import matplotlib
 matplotlib.use("Agg")  # non-interactive backend, safe for threads
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -326,20 +332,24 @@ class SimulatedDevice(threading.Thread):
 
         normal_mse = float(np.median(errors[normal_mask])) if normal_mask.any() else float("nan")
         attack_mse = float(np.median(errors[attack_mask])) if attack_mask.any() else float("nan")
+        accuracy  = accuracy_score(y_test, y_pred)
         precision = precision_score(y_test, y_pred, zero_division = 0)
         recall = recall_score(y_test, y_pred, zero_division = 0)
         f1 = f1_score(y_test, y_pred, zero_division = 0)
         cm = confusion_matrix(y_test, y_pred)
 
         if normal_mask.any() and attack_mask.any():
-            auroc = roc_auc_score(y_test, errors)
+            auroc   = roc_auc_score(y_test, errors)
+            prauc   = average_precision_score(y_test, errors)
+            bal_acc = balanced_accuracy_score(y_test, y_pred)
         else:
-            auroc = float("nan")
+            auroc = prauc = bal_acc = float("nan")
 
         print(
             f"[Device {self.client_id}] Test results — "
             f"Threshold: {threshold:.6f} | "
-            f"AUROC: {auroc:.4f} | "
+            f"AUROC: {auroc:.4f} | PR-AUC: {prauc:.4f} | "
+            f"Accuracy: {accuracy:.4f} | Bal-Acc: {bal_acc:.4f} | "
             f"Precision: {precision:.4f} | "
             f"Recall: {recall:.4f} | "
             f"F1: {f1:.4f} | "
@@ -351,13 +361,16 @@ class SimulatedDevice(threading.Thread):
         print(cm)
 
         return {
-            "threshold":       threshold,
-            "auroc":           auroc,
-            "precision":       precision,
-            "recall":          recall,
-            "f1":              f1,
-            "normal_mse":      normal_mse,
-            "attack_mse":      attack_mse,
+            "threshold":        threshold,
+            "auroc":            auroc,
+            "prauc":            prauc,
+            "accuracy":         accuracy,
+            "bal_acc":          bal_acc,
+            "precision":        precision,
+            "recall":           recall,
+            "f1":               f1,
+            "normal_mse":       normal_mse,
+            "attack_mse":       attack_mse,
             "confusion_matrix": cm,
         }
 
@@ -397,6 +410,9 @@ class SimulatedDevice(threading.Thread):
             f"=== Evaluation Results ===\n"
             f"Threshold:         {metrics['threshold']:.6f}\n"
             f"AUROC:             {metrics['auroc']:.4f}\n"
+            f"PR-AUC:            {metrics['prauc']:.4f}\n"
+            f"Accuracy:          {metrics['accuracy']:.4f}\n"
+            f"Balanced Accuracy: {metrics['bal_acc']:.4f}\n"
             f"Precision:         {metrics['precision']:.4f}\n"
             f"Recall:            {metrics['recall']:.4f}\n"
             f"F1 Score:          {metrics['f1']:.4f}\n"

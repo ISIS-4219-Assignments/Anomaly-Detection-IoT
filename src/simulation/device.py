@@ -132,6 +132,7 @@ class SimulatedDevice(threading.Thread):
         self.results_dir = results_dir
         self._train_losses: list[float] = []
         self._val_losses: list[float] = []
+        self.metrics: dict | None = None
 
 
     # ------------------------------------------------------------------
@@ -261,7 +262,7 @@ class SimulatedDevice(threading.Thread):
             X_val_pred = final_model.predict(X_val, batch_size = 256, verbose = 0)
 
         axes = tuple(range(1, X_val.ndim))
-        val_errors = np.mean((X_val - X_val_pred) ** 2, axis = axes)
+        val_errors = np.median((X_val - X_val_pred) ** 2, axis = axes)
 
         threshold = float(np.percentile(val_errors, 99))
 
@@ -271,6 +272,7 @@ class SimulatedDevice(threading.Thread):
         )
         # ---- Evaluation phase (runs after all training rounds complete) ----
         metrics = self.evaluate(self.server.global_model, threshold)
+        self.metrics = metrics
         self._save_results(metrics)
 
 
@@ -342,13 +344,14 @@ class SimulatedDevice(threading.Thread):
 
         # Per-sample reconstruction error (MSE averaged over all non-batch dims)
         axes = tuple(range(1, X_test.ndim))  # (1,) for vanilla; (1, 2) for sequence
-        errors = np.mean((X_test - X_pred) ** 2, axis = axes)
+        errors = np.median((X_test - X_pred) ** 2, axis = axes)
         
         y_pred = (errors > threshold).astype(int)
 
         normal_mask = y_test == 0
         attack_mask = y_test == 1
 
+        normal_mse = float(np.median(errors[normal_mask])) if normal_mask.any() else float("nan")
         attack_mse = float(np.median(errors[attack_mask])) if attack_mask.any() else float("nan")
         precision = precision_score(y_test, y_pred, zero_division = 0)
         recall = recall_score(y_test, y_pred, zero_division = 0)
@@ -380,10 +383,12 @@ class SimulatedDevice(threading.Thread):
 
         print(
             f"[Device {self.client_id}] Test results — "
+            f"Threshold: {threshold:.4f}"
             f"AUROC: {auroc:.4f} | PR-AUC: {prauc:.4f} | "
             f"Precision: {precision:.4f} | Recall: {recall:.4f} | "
             f"Acc(bal): {bal_acc:.4f} | F1(bal): {f1_bal:.4f} | "
-            f"Median MSE: {attack_mse:.6f} | "
+            f"Normal Median MSE: {normal_mse:.6f} | "
+            f"Attack Median MSE: {attack_mse:.6f} | "
             f"TP: {tp} | FN: {fn} | n: {n}"
         )
 
@@ -391,12 +396,14 @@ class SimulatedDevice(threading.Thread):
         print(cm)
 
         return {
+            "threshold":        threshold,
             "auroc":            auroc,
             "prauc":            prauc,
             "precision":        precision,
             "recall":           recall,
             "bal_acc":          bal_acc,
             "f1_bal":           f1_bal,
+            "normal_mse":       normal_mse,
             "attack_mse":       attack_mse,
             "tp":               tp,
             "fn":               fn,
@@ -438,13 +445,15 @@ class SimulatedDevice(threading.Thread):
             f"Total epochs:  {len(self._train_losses)}\n"
             f"\n"
             f"=== Evaluation Results ===\n"
+            f"Threshold:      {metrics['threshold']:.4f}\n" 
             f"AUROC:      {metrics['auroc']:.4f}\n"
             f"PR-AUC:     {metrics['prauc']:.4f}\n"
             f"Precision:  {metrics['precision']:.4f}\n"
             f"Recall:     {metrics['recall']:.4f}\n"
             f"Acc(bal):   {metrics['bal_acc']:.4f}\n"
             f"F1(bal):    {metrics['f1_bal']:.4f}\n"
-            f"Median MSE: {metrics['attack_mse']:.6f}\n"
+            f"Normal Median MSE: {metrics['normal_mse']:.6f}\n"
+            f"Attack Median MSE: {metrics['attack_mse']:.6f}\n"
             f"TP:         {metrics['tp']}\n"
             f"FN:         {metrics['fn']}\n"
             f"n:          {metrics['n']}\n"

@@ -231,7 +231,7 @@ def _evaluate_global_test(
         X_val_pred = model.predict(X_val, batch_size=256, verbose=0)
 
     axes       = tuple(range(1, X_val.ndim))
-    val_errors = np.mean((X_val - X_val_pred) ** 2, axis=axes)
+    val_errors = np.median((X_val - X_val_pred) ** 2, axis=axes)
     threshold  = float(np.percentile(val_errors, 99))
     print(f"[Global Eval] Threshold: {threshold:.6f}")
 
@@ -254,7 +254,7 @@ def _evaluate_global_test(
         X_pred = model.predict(X_test, batch_size=256, verbose=0)
 
     axes   = tuple(range(1, X_test.ndim))
-    errors = np.mean((X_test - X_pred) ** 2, axis=axes)
+    errors = np.median((X_test - X_pred) ** 2, axis=axes)
     y_pred = (errors > threshold).astype(int)
 
     normal_mask = y_labels == 0
@@ -290,10 +290,12 @@ def _evaluate_global_test(
         f1_bal_g = float("nan")
 
     print(
+        f"Threshold: {threshold:.4f}"
         f"[Global Eval] AUROC: {auroc:.4f} | PR-AUC: {prauc:.4f} | "
         f"Precision: {precision:.4f} | Recall: {recall_val:.4f} | "
         f"Acc(bal): {bal_acc:.4f} | F1(bal): {f1_bal_g:.4f} | "
-        f"Median MSE: {attack_mse:.6f} | "
+        f"Normal Median MSE: {normal_mse:.6f} | "
+        f"Attack Median MSE: {attack_mse:.6f} | "
         f"TP: {tp_g} | FN: {fn_g} | n: {n_g}"
     )
 
@@ -360,13 +362,15 @@ def _evaluate_global_test(
         lines = [
             "=== Global Generalisation Evaluation ===",
             f"Architecture:  {model_type}",
+            f"Threshold:     {threshold:.4f}",
             f"AUROC:         {auroc:.4f}",
             f"PR-AUC:        {prauc:.4f}",
             f"Precision:     {precision:.4f}",
             f"Recall:        {recall_val:.4f}",
             f"Acc(bal):      {bal_acc:.4f}",
             f"F1(bal):       {f1_bal_g:.4f}",
-            f"Median MSE:    {attack_mse:.6f}",
+            f"Normal Median MSE:    {normal_mse:.6f}",
+            f"Attack Median MSE:    {attack_mse:.6f}",
             f"TP:            {tp_g}",
             f"FN:            {fn_g}",
             f"n:             {n_g}",
@@ -383,6 +387,117 @@ def _evaluate_global_test(
             f.write("\n".join(lines) + "\n")
         print(f"[Global Eval] Report saved → {report_path}")
 
+def _aggregate_device_metrics(device_metrics: list[dict], results_dir, model_type: str) -> dict:
+    """Aggregate local device metrics into network-level metrics.
+
+    Threshold-based metrics are computed from the sum of all device confusion
+    matrices. AUROC, PR-AUC, threshold, normal_mse and attack_mse are reported
+    as sample-weighted averages using each device test size as weight.
+    """
+
+    if not device_metrics:
+        print("[Network Metrics] No device metrics available.")
+        return {}
+
+    # Sum confusion matrices across devices
+    total_cm = np.sum(
+        [m["confusion_matrix"] for m in device_metrics],
+        axis=0
+    )
+
+    tn, fp, fn, tp = total_cm.ravel()
+    total = tn + fp + fn + tp
+
+    accuracy = (tp + tn) / total if total > 0 else float("nan")
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    bal_acc = (recall + specificity) / 2 if total > 0 else float("nan")
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
+
+    # Number of evaluated samples per device
+    weights = np.array(
+        [np.sum(m["confusion_matrix"]) for m in device_metrics],
+        dtype=float
+    )
+
+    def weighted_metric(key: str) -> float:
+        values = np.array([m[key] for m in device_metrics], dtype=float)
+        mask = ~np.isnan(values)
+
+        if not mask.any():
+            return float("nan")
+
+        return float(np.average(values[mask], weights=weights[mask]))
+
+    aggregated = {
+        "num_devices": len(device_metrics),
+        "num_samples": int(total),
+        "threshold_weighted": weighted_metric("threshold"),
+        "auroc_weighted": weighted_metric("auroc"),
+        "prauc_weighted": weighted_metric("prauc"),
+        "accuracy": float(accuracy),
+        "bal_acc": float(bal_acc),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+        "normal_mse_weighted": weighted_metric("normal_mse"),
+        "attack_mse_weighted": weighted_metric("attack_mse"),
+        "confusion_matrix": total_cm,
+    }
+
+    print("\n=== Network-Level Device Metrics ===")
+    print(
+        f"Devices: {aggregated['num_devices']} | "
+        f"Samples: {aggregated['num_samples']} | "
+        f"AUROC(w): {aggregated['auroc_weighted']:.4f} | "
+        f"PR-AUC(w): {aggregated['prauc_weighted']:.4f} | "
+        f"Accuracy: {aggregated['accuracy']:.4f} | "
+        f"Bal-Acc: {aggregated['bal_acc']:.4f} | "
+        f"Precision: {aggregated['precision']:.4f} | "
+        f"Recall: {aggregated['recall']:.4f} | "
+        f"F1: {aggregated['f1']:.4f}"
+    )
+
+    print("Confusion matrix:")
+    print(total_cm)
+
+    if results_dir is not None:
+        os.makedirs(results_dir, exist_ok=True)
+        report_path = os.path.join(results_dir, f"{model_type}_network_report.txt")
+
+        lines = [
+            "=== Network-Level Device Metrics ===",
+            f"Architecture:              {model_type}",
+            f"Devices:                   {aggregated['num_devices']}",
+            f"Total samples:             {aggregated['num_samples']}",
+            f"Weighted Threshold:        {aggregated['threshold_weighted']:.6f}",
+            f"Weighted AUROC:            {aggregated['auroc_weighted']:.4f}",
+            f"Weighted PR-AUC:           {aggregated['prauc_weighted']:.4f}",
+            f"Accuracy:                  {aggregated['accuracy']:.4f}",
+            f"Balanced Accuracy:         {aggregated['bal_acc']:.4f}",
+            f"Precision:                 {aggregated['precision']:.4f}",
+            f"Recall:                    {aggregated['recall']:.4f}",
+            f"F1 Score:                  {aggregated['f1']:.4f}",
+            f"Weighted Normal Median MSE:{aggregated['normal_mse_weighted']:.6f}",
+            f"Weighted Attack Median MSE:{aggregated['attack_mse_weighted']:.6f}",
+            "",
+            "Confusion Matrix:",
+            "  (rows=actual, cols=predicted)",
+            f"  TN={tn}  FP={fp}",
+            f"  FN={fn}  TP={tp}",
+        ]
+
+        with open(report_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+        print(f"[Network Metrics] Report saved → {report_path}")
+
+    return aggregated
 
 # ---------------------------------------------------------------------------
 # Main
@@ -459,6 +574,18 @@ def main() -> None:
         device.join()
 
     print("\nAll threads closed.")
+    
+    device_metrics = [
+        device.metrics
+        for device in devices
+        if device.metrics is not None
+    ]
+    
+    _aggregate_device_metrics(
+        device_metrics=device_metrics,
+        results_dir=str(RESULTS_DIR),
+        model_type=MODEL_TYPE,
+    )
 
     # --- Step 6: global generalisation evaluation ---
     _evaluate_global_test(

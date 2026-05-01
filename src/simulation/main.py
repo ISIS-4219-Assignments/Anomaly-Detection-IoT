@@ -31,6 +31,7 @@ from device import SimulatedDevice
 from server import CentralServer
 from pathlib import Path
 import pandas as pd
+import threading
 import os
 
 
@@ -39,19 +40,19 @@ import os
 # ---------------------------------------------------------------------------
 
 
-MODEL_TYPE  = "transformer"  # "vanilla" | "lstm" | "conv1d" | "transformer"
+MODEL_TYPE  = "lstm"  # "vanilla" | "lstm" | "conv1d" | "transformer"
 WINDOW_SIZE = 30       # None for vanilla; e.g. 30 for lstm / conv1d
 
-NUM_ROUNDS    = 3   # federated communication rounds
+NUM_ROUNDS    = 2   # federated communication rounds
 LOCAL_EPOCHS  = 5   # local training epochs per round per device
 
 # Devices whose splits will participate in this run.
 # Each name must match a subdirectory under data/splits/.
 DEVICE_NAMES = [
     "Distance",
-    #"Flame_Sensor",
-    #"IR_Receiver",
-    #"phValue",
+    "Flame_Sensor",
+    "IR_Receiver",
+    "phValue",
 ]
 
 # Absolute dir of src/simulation/
@@ -167,6 +168,7 @@ def main() -> None:
     )
 
     # --- Step 4: devices ---
+    gpu_lock = threading.Lock()
     devices = [
         SimulatedDevice(
             client_id        = name,
@@ -177,6 +179,7 @@ def main() -> None:
             window_size      = WINDOW_SIZE,
             known_categories = known_categories,
             local_epochs     = LOCAL_EPOCHS,
+            gpu_lock         = gpu_lock,
         )
         for name, paths in zip(DEVICE_NAMES, all_paths)
     ]

@@ -68,6 +68,7 @@ class SimulatedDevice(threading.Thread):
         window_size: int | None = None,
         known_categories: dict | None = None,
         local_epochs: int = 5,
+        gpu_lock: threading.Lock | None = None,
     ):
         
         """Initialise the device thread.
@@ -107,6 +108,7 @@ class SimulatedDevice(threading.Thread):
         self.window_size = window_size
         self.known_categories = known_categories
         self.local_epochs = local_epochs
+        self.gpu_lock = gpu_lock or threading.Lock()
 
 
     # ------------------------------------------------------------------
@@ -191,14 +193,15 @@ class SimulatedDevice(threading.Thread):
             model.set_weights(self.server.global_model)
 
             # Train locally; autoencoder target is the input itself
-            history = model.fit(
-                X_train,
-                X_train,
-                validation_data = (X_val, X_val),
-                epochs = self.local_epochs,
-                batch_size = 64,
-                verbose = 0,
-            )
+            with self.gpu_lock:
+                history = model.fit(
+                    X_train,
+                    X_train,
+                    validation_data = (X_val, X_val),
+                    epochs = self.local_epochs,
+                    batch_size = 64,
+                    verbose = 0,
+                )
 
             train_loss = history.history["loss"][-1]
             val_loss   = history.history["val_loss"][-1]
@@ -217,7 +220,8 @@ class SimulatedDevice(threading.Thread):
         final_model = build_model(self.model_type, self.input_dim, self.window_size)
         final_model.set_weights(self.server.global_model)
 
-        X_val_pred = final_model.predict(X_val, batch_size = 256, verbose = 0)
+        with self.gpu_lock:
+            X_val_pred = final_model.predict(X_val, batch_size = 256, verbose = 0)
 
         axes = tuple(range(1, X_val.ndim))
         val_errors = np.mean((X_val - X_val_pred) ** 2, axis = axes)
@@ -277,7 +281,8 @@ class SimulatedDevice(threading.Thread):
         model = build_model(self.model_type, self.input_dim, self.window_size)
         model.set_weights(global_weights)
 
-        X_pred = model.predict(X_test, batch_size = 256, verbose = 0)
+        with self.gpu_lock:
+            X_pred = model.predict(X_test, batch_size = 256, verbose = 0)
 
         # Per-sample reconstruction error (MSE averaged over all non-batch dims)
         axes = tuple(range(1, X_test.ndim))  # (1,) for vanilla; (1, 2) for sequence

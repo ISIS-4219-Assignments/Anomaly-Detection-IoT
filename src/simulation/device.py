@@ -176,6 +176,7 @@ class SimulatedDevice(threading.Thread):
             X_train = create_windows(X_train, self.window_size)
             X_val = create_windows(X_val, self.window_size)
 
+        self._n_train_samples = X_train.shape[0]
         return X_train, X_val
 
 
@@ -250,7 +251,7 @@ class SimulatedDevice(threading.Thread):
             )
 
                 # Submit weights and block at the barrier until all devices finish
-            self.server.receive_update(self.client_id, model.get_weights())
+            self.server.receive_update(self.client_id, model.get_weights(), self._n_train_samples)
 
         # ---- Threshold phase ----
         print(f"[Device {self.client_id}] Computing anomaly threshold...")

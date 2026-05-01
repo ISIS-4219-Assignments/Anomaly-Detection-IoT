@@ -101,7 +101,7 @@ class CentralServer:
         initial_model = build_model(model_type, input_dim, window_size)
         self.global_model: list[np.ndarray] = initial_model.get_weights()
 
-        self.updates: list[list[np.ndarray]] = []
+        self.updates: list[tuple[list[np.ndarray], int]] = []
         self.lock = threading.Lock()
         self.total_clients = total_clients
         self.rounds_to_simulate = rounds_to_simulate
@@ -125,9 +125,9 @@ class CentralServer:
 
 
     def receive_update(
-        self, client_id: int | str, local_weights: list[np.ndarray]
+        self, client_id: int | str, local_weights: list[np.ndarray], n_samples: int
     ) -> None:
-        
+
         """Accept a local weight update and block until the round ends.
 
         The update is appended to :attr:`updates` under the lock to prevent
@@ -142,12 +142,17 @@ class CentralServer:
             Weights from the device's locally-trained model in Keras
             ``get_weights()`` format.  Must match the structure of
             :attr:`global_model`.
+        n_samples : int
+            Number of training samples used by this device in the current round.
+            Used to weight this device's contribution during aggregation so that
+            larger devices have proportionally more influence (weighted FedAvg).
         """
 
         with self.lock:
-            self.updates.append(local_weights)
+            self.updates.append((local_weights, n_samples))
             print(
-                f"[Server] Received update from Device {client_id}. "
+                f"[Server] Received update from Device {client_id} "
+                f"(n={n_samples}). "
                 f"({len(self.updates)}/{self.total_clients})"
             )
 
@@ -162,12 +167,12 @@ class CentralServer:
 
     def aggregate_and_update(self) -> None:
 
-        """Average all collected local weights and update the global model.
+        """Aggregate collected local weights with sample-weighted FedAvg.
 
-        Implements FedAvg: for each weight tensor, the new global value is
-        the element-wise mean of the corresponding tensors from all clients.
-        The updates list is cleared and the round counter incremented before
-        threads are released.
+        Each device's contribution to the new global model is proportional to
+        its training set size (``n_samples`` passed via :meth:`receive_update`),
+        so devices with more data have more influence.  The updates list is
+        cleared and the round counter incremented before threads are released.
 
         This method is invoked automatically by :attr:`sync_barrier` and
         should never be called directly.
@@ -175,9 +180,13 @@ class CentralServer:
         
         print(f"\n--- Aggregating models for Round {self.current_round} ---")
 
-        # FedAvg: layer-wise mean across all client weight lists
+        # Weighted FedAvg: each device's contribution is proportional to its
+        # training set size so larger devices have more influence on the global model.
+        weights_list = [w for w, _ in self.updates]
+        counts       = np.array([n for _, n in self.updates], dtype=np.float64)
+        total        = counts.sum()
         self.global_model = [
-            np.mean([client_weights[i] for client_weights in self.updates], axis = 0)
+            np.sum([weights_list[j][i] * counts[j] for j in range(len(self.updates))], axis=0) / total
             for i in range(len(self.global_model))
         ]
 

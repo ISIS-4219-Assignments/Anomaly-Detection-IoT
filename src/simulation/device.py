@@ -288,8 +288,8 @@ class SimulatedDevice(threading.Thread):
         normal_mask = y_test == 0
         attack_mask = y_test == 1
 
-        normal_mse = float(np.mean(errors[normal_mask])) if normal_mask.any() else float("nan")
-        attack_mse = float(np.mean(errors[attack_mask])) if attack_mask.any() else float("nan")
+        normal_mse = float(np.median(errors[normal_mask])) if normal_mask.any() else float("nan")
+        attack_mse = float(np.median(errors[attack_mask])) if attack_mask.any() else float("nan")
         precision = precision_score(y_test, y_pred, zero_division = 0)
         recall = recall_score(y_test, y_pred, zero_division = 0)
         f1 = f1_score(y_test, y_pred, zero_division = 0)
@@ -307,8 +307,8 @@ class SimulatedDevice(threading.Thread):
             f"Precision: {precision:.4f} | "
             f"Recall: {recall:.4f} | "
             f"F1: {f1:.4f} | "
-            f"normal_mse: {normal_mse:.4f} | "
-            f"attack_mse: {attack_mse:.4f}"
+            f"normal_median_mse: {normal_mse:.6f} | "
+            f"attack_median_mse: {attack_mse:.6f}"
         )
 
         print(f"[Device {self.client_id}] Confusion matrix:")

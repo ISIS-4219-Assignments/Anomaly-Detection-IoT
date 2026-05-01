@@ -59,14 +59,16 @@ def build_lstm(input_dim: int, window_size: int, latent_dim: int = 32) -> Model:
 
     # --- Encoder ---
     x = layers.LSTM(64, return_sequences=True, name="enc_lstm_1")(inputs)
+    x = layers.LSTM(32, return_sequences=True, name="enc_lstm_2")(x)
+
     # return_sequences=False collapses the time axis → bottleneck vector
     encoded = layers.LSTM(latent_dim, return_sequences=False, name="bottleneck")(x)
 
     # --- Decoder ---
-    # Broadcast the latent vector to every time step before decoding
-    x = layers.RepeatVector(window_size, name="repeat")(encoded)
-    x = layers.LSTM(latent_dim, return_sequences=True, name="dec_lstm_1")(x)
-    x = layers.LSTM(64, return_sequences=True, name="dec_lstm_2")(x)
+    x = layers.Dense(window_size * 32, activation="relu", name = "dec_dense")(encoded)
+    x = layers.Reshape((window_size, 32), name = "reshape")(x)
+    x = layers.LSTM(64, return_sequences=True, name="dec_lstm_1")(x)
+
     # TimeDistributed applies the same Dense independently at each time step
     outputs = layers.TimeDistributed(
         layers.Dense(input_dim, activation="linear"), name="output"

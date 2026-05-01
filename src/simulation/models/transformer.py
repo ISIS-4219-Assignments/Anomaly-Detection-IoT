@@ -39,7 +39,7 @@ from keras import layers
 def build_transformer(
     input_dim: int,
     window_size: int,
-    latent_dim: int = 32,
+    latent_dim: int = 16,
     num_heads: int = 4,
     d_model: int = 64,
     ff_dim: int = 128,
@@ -56,7 +56,7 @@ def build_transformer(
         value passed to :func:`windowing.create_windows`.
     latent_dim : int, optional
         Size of the Dense bottleneck that separates encoder from decoder.
-        Default: 32.
+        Default: 16.
     num_heads : int, optional
         Number of attention heads in both MHA layers.  Must evenly divide
         ``d_model``.  Default: 4.
@@ -89,7 +89,6 @@ def build_transformer(
         )
 
     key_dim = d_model // num_heads
-
     inputs = Input(shape=(window_size, input_dim), name="input")
 
     # --- Encoder ---
@@ -103,28 +102,21 @@ def build_transformer(
     x = layers.LayerNormalization(name="enc_ln_1")(x + attn)
 
     # Feed-forward sub-layer with residual + LayerNorm
-    ffn = layers.Dense(ff_dim, activation="relu", name="enc_ffn_1")(x)
-    ffn = layers.Dense(d_model, name="enc_ffn_2")(ffn)
+    ffn = layers.Dense(128, activation="relu", name="enc_ffn_intermediate")(x)
+    ffn = layers.Dense(d_model, name="enc_ffn_out")(ffn)
     x = layers.LayerNormalization(name="enc_ln_2")(x + ffn)
 
+    x = layers.Dense(32, activation="relu", name="enc_fnn_32")(x)
     # Pool across the time axis → (batch, d_model), then compress to bottleneck
     x = layers.GlobalAveragePooling1D(name="gap")(x)
     encoded = layers.Dense(latent_dim, activation="relu", name="bottleneck")(x)
 
     # --- Decoder ---
     # Expand latent vector back to (batch, window_size, d_model)
-    x = layers.Dense(window_size * d_model, activation="relu", name="dec_dense")(encoded)
-    x = layers.Reshape((window_size, d_model), name="reshape")(x)
+    x = layers.Dense(window_size * 32, activation="relu", name="dec_dense")(encoded)
+    x = layers.Reshape((window_size, 32), name="reshape")(x)
 
-    # Symmetric transformer block in the decoder
-    attn = layers.MultiHeadAttention(
-        num_heads=num_heads, key_dim=key_dim, name="dec_mha"
-    )(x, x)
-    x = layers.LayerNormalization(name="dec_ln_1")(x + attn)
-
-    ffn = layers.Dense(ff_dim, activation="relu", name="dec_ffn_1")(x)
-    ffn = layers.Dense(d_model, name="dec_ffn_2")(ffn)
-    x = layers.LayerNormalization(name="dec_ln_2")(x + ffn)
+    x = layers.Dense(d_model, name="dec_upscale")(x)
 
     # Project back to the original feature dimension at each time step
     outputs = layers.TimeDistributed(

@@ -33,7 +33,7 @@ from keras import Input, Model
 from keras import layers
 
 
-def build_conv1d(input_dim: int, window_size: int, latent_dim: int = 32) -> Model:
+def build_conv1d(input_dim: int, window_size: int, latent_dim: int = 16) -> Model:
 
     """Build and compile a 1-D convolutional autoencoder.
 
@@ -70,19 +70,19 @@ def build_conv1d(input_dim: int, window_size: int, latent_dim: int = 32) -> Mode
     inputs = Input(shape=(window_size, input_dim), name="input")
 
     # --- Encoder ---
-    x = layers.Conv1D(32, kernel_size=3, padding="same", activation="relu", name="enc_conv_1")(inputs)
-    x = layers.Conv1D(16, kernel_size=3, padding="same", activation="relu", name="enc_conv_2")(x)
+    x = layers.Conv1D(64, kernel_size = 3, padding = "same", activation = "relu", name = "enc_conv_1")(inputs)
+    x = layers.Conv1D(32, kernel_size = 3, padding = "same", activation = "relu", name = "enc_conv_2")(x)
     # GlobalAveragePooling1D averages across the time axis → (batch, 16)
     # This avoids the (batch, window*16) shape from Flatten that causes XLA tiling issues
-    x = layers.GlobalAveragePooling1D(name="gap")(x)
-    encoded = layers.Dense(latent_dim, activation="relu", name="bottleneck")(x)
+    x = layers.GlobalAveragePooling1D(name = "gap")(x)
+    encoded = layers.Dense(latent_dim, activation = "relu", name = "bottleneck")(x)
 
     # --- Decoder ---
-    # Project back to (window_size, 16) to feed the decoder Conv1D layers
-    x = layers.Dense(window_size * 16, activation="relu", name="dec_dense")(encoded)
-    x = layers.Reshape((window_size, 16), name="reshape")(x)
-    x = layers.Conv1D(32, kernel_size=3, padding="same", activation="relu", name="dec_conv_1")(x)
-    outputs = layers.Conv1D(input_dim, kernel_size=3, padding="same", activation="linear", name="output")(x)
+    # Project back to (window_size, 32) to feed the decoder Conv1D layers
+    x = layers.Dense(window_size * 32, activation = "relu", name = "dec_dense")(encoded)
+    x = layers.Reshape((window_size, 32), name = "reshape")(x)
+    x = layers.Conv1D(64, kernel_size = 3, padding = "same", activation = "relu", name = "dec_conv_1")(x)
+    outputs = layers.Conv1D(input_dim, kernel_size = 3, padding = "same", activation = "linear", name = "output")(x)
 
     model = Model(inputs, outputs, name="conv1d_autoencoder")
     model.compile(optimizer="adam", loss="mse")

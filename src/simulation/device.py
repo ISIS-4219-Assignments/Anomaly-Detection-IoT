@@ -21,9 +21,13 @@ from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_sco
 from preprocessor import IoTPreprocessor
 from models.factory import build_model
 from windowing import create_windows
+import matplotlib
+matplotlib.use("Agg")  # non-interactive backend, safe for threads
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import threading
+import os
 
 
 class SimulatedDevice(threading.Thread):
@@ -69,6 +73,7 @@ class SimulatedDevice(threading.Thread):
         known_categories: dict | None = None,
         local_epochs: int = 5,
         gpu_lock: threading.Lock | None = None,
+        results_dir: str | None = None,
     ):
         
         """Initialise the device thread.
@@ -109,6 +114,9 @@ class SimulatedDevice(threading.Thread):
         self.known_categories = known_categories
         self.local_epochs = local_epochs
         self.gpu_lock = gpu_lock or threading.Lock()
+        self.results_dir = results_dir
+        self._train_losses: list[float] = []
+        self._val_losses: list[float] = []
 
 
     # ------------------------------------------------------------------
@@ -203,6 +211,9 @@ class SimulatedDevice(threading.Thread):
                     verbose = 0,
                 )
 
+            self._train_losses.extend(history.history["loss"])
+            self._val_losses.extend(history.history["val_loss"])
+
             train_loss = history.history["loss"][-1]
             val_loss   = history.history["val_loss"][-1]
             print(
@@ -211,7 +222,7 @@ class SimulatedDevice(threading.Thread):
                 "Sending weights to server..."
             )
 
-            # Submit weights and block at the barrier until all devices finish
+                # Submit weights and block at the barrier until all devices finish
             self.server.receive_update(self.client_id, model.get_weights())
 
         # ---- Threshold phase ----
@@ -233,7 +244,8 @@ class SimulatedDevice(threading.Thread):
             f"{threshold:.6f}"
         )
         # ---- Evaluation phase (runs after all training rounds complete) ----
-        self.evaluate(self.server.global_model, threshold)
+        metrics = self.evaluate(self.server.global_model, threshold)
+        self._save_results(metrics)
 
 
     def evaluate(self, global_weights: list[np.ndarray], threshold: float) -> None:
@@ -318,3 +330,66 @@ class SimulatedDevice(threading.Thread):
 
         print(f"[Device {self.client_id}] Confusion matrix:")
         print(cm)
+
+        return {
+            "threshold":       threshold,
+            "auroc":           auroc,
+            "precision":       precision,
+            "recall":          recall,
+            "f1":              f1,
+            "normal_mse":      normal_mse,
+            "attack_mse":      attack_mse,
+            "confusion_matrix": cm,
+        }
+
+
+    def _save_results(self, metrics: dict) -> None:
+
+        if self.results_dir is None:
+            return
+
+        out_dir = os.path.join(self.results_dir, str(self.client_id))
+        os.makedirs(out_dir, exist_ok=True)
+        prefix = os.path.join(out_dir, self.model_type)
+
+        # --- loss curve ---
+        epochs = range(1, len(self._train_losses) + 1)
+        fig, ax = plt.subplots()
+        ax.plot(epochs, self._train_losses, label="train loss")
+        ax.plot(epochs, self._val_losses,   label="val loss")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss (MSE)")
+        ax.set_title(f"Device {self.client_id} — {self.model_type} — Loss Curve")
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(f"{prefix}_loss_curve.png", dpi=150)
+        plt.close(fig)
+
+        # --- text report ---
+        cm = metrics["confusion_matrix"]
+        rounds = self.server.rounds_to_simulate
+        report = (
+            f"Device:        {self.client_id}\n"
+            f"Architecture:  {self.model_type}\n"
+            f"Rounds:        {rounds}\n"
+            f"Local epochs:  {self.local_epochs}\n"
+            f"Total epochs:  {rounds * self.local_epochs}\n"
+            f"\n"
+            f"=== Evaluation Results ===\n"
+            f"Threshold:         {metrics['threshold']:.6f}\n"
+            f"AUROC:             {metrics['auroc']:.4f}\n"
+            f"Precision:         {metrics['precision']:.4f}\n"
+            f"Recall:            {metrics['recall']:.4f}\n"
+            f"F1 Score:          {metrics['f1']:.4f}\n"
+            f"Normal Median MSE: {metrics['normal_mse']:.6f}\n"
+            f"Attack Median MSE: {metrics['attack_mse']:.6f}\n"
+            f"\n"
+            f"Confusion Matrix:\n"
+            f"  (rows=actual, cols=predicted)\n"
+            f"  TN={cm[0,0]}  FP={cm[0,1]}\n"
+            f"  FN={cm[1,0]}  TP={cm[1,1]}\n"
+        )
+        with open(f"{prefix}_report.txt", "w") as f:
+            f.write(report)
+
+        print(f"[Device {self.client_id}] Results saved → {out_dir}/")

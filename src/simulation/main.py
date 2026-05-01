@@ -51,8 +51,8 @@ LOCAL_EPOCHS  = 5   # local training epochs per round per device
 DEVICE_NAMES = [
     "Distance",
     "Flame_Sensor",
-    "IR_Receiver",
-    "phValue",
+    #"IR_Receiver",
+    #"phValue",
 ]
 
 # Absolute dir of src/simulation/
@@ -66,6 +66,9 @@ SPLITS_DIR = PROJECT_ROOT / "data" / "splits"
 
 # src/models
 MODELS_DIR = PROJECT_ROOT / "src" / "models"
+
+# results/
+RESULTS_DIR = PROJECT_ROOT / "results"
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +183,7 @@ def main() -> None:
             known_categories = known_categories,
             local_epochs     = LOCAL_EPOCHS,
             gpu_lock         = gpu_lock,
+            results_dir      = RESULTS_DIR,
         )
         for name, paths in zip(DEVICE_NAMES, all_paths)
     ]

@@ -1,0 +1,19 @@
+Device:        Distance
+Architecture:  conv1d
+Rounds:        7
+Local epochs:  15
+Total epochs:  105
+
+=== Evaluation Results ===
+Threshold:         0.396034
+AUROC:             0.9993
+Precision:         0.9819
+Recall:            1.0000
+F1 Score:          0.9909
+Normal Median MSE: 0.120006
+Attack Median MSE: 398554048.000000
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=22826  FP=383
+  FN=0  TP=20798

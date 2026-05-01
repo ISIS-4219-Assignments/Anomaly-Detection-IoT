@@ -1,0 +1,19 @@
+Device:        phValue
+Architecture:  conv1d
+Rounds:        7
+Local epochs:  15
+Total epochs:  105
+
+=== Evaluation Results ===
+Threshold:         0.416484
+AUROC:             0.9997
+Precision:         0.9840
+Recall:            1.0000
+F1 Score:          0.9920
+Normal Median MSE: 0.209154
+Attack Median MSE: 2840.562500
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=13926  FP=216
+  FN=0  TP=13326

@@ -40,19 +40,19 @@ import os
 # ---------------------------------------------------------------------------
 
 
-MODEL_TYPE  = "lstm"  # "vanilla" | "lstm" | "conv1d" | "transformer"
+MODEL_TYPE  = "conv1d"  # "vanilla" | "lstm" | "conv1d" | "transformer"
 WINDOW_SIZE = 30       # None for vanilla; e.g. 30 for lstm / conv1d
 
-NUM_ROUNDS    = 2   # federated communication rounds
-LOCAL_EPOCHS  = 5   # local training epochs per round per device
+NUM_ROUNDS    = 7   # federated communication rounds
+LOCAL_EPOCHS  = 15   # local training epochs per round per device
 
 # Devices whose splits will participate in this run.
 # Each name must match a subdirectory under data/splits/.
 DEVICE_NAMES = [
     "Distance",
     "Flame_Sensor",
-    #"IR_Receiver",
-    #"phValue",
+    "IR_Receiver",
+    "phValue",
 ]
 
 # Absolute dir of src/simulation/

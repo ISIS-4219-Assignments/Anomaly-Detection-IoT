@@ -1,0 +1,19 @@
+Device:        Flame_Sensor
+Architecture:  conv1d
+Rounds:        7
+Local epochs:  15
+Total epochs:  105
+
+=== Evaluation Results ===
+Threshold:         0.301810
+AUROC:             0.9964
+Precision:         0.9616
+Recall:            1.0000
+F1 Score:          0.9804
+Normal Median MSE: 0.088368
+Attack Median MSE: 4.247707
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=20698  FP=594
+  FN=0  TP=14892

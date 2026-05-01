@@ -8,6 +8,7 @@ Architecture
 ------------
 Input  (batch, window, features)
   → Encoder : Dense(d_model)                        ← feature projection
+              + learned positional encoding          ← position-aware embeddings
               MultiHeadAttention + LayerNorm         ← self-attention block
               FFN(ff_dim → d_model) + LayerNorm      ← feed-forward block
               Dense(32, relu)                        ← channel compression
@@ -20,9 +21,10 @@ Input  (batch, window, features)
   → Output  (batch, window, features)
 
 The encoder projects each time step into a ``d_model``-dimensional space,
-applies one transformer block (self-attention + FFN with residual connections
-and LayerNorm), then pools across the time axis to form a latent vector.
-The decoder projects the latent vector back to a ``(window_size, 32)``
+adds a learned positional embedding so the attention blocks can distinguish
+frame order, applies one transformer block (self-attention + FFN with residual
+connections and LayerNorm), then pools across the time axis to form a latent
+vector.  The decoder projects the latent vector back to a ``(window_size, 32)``
 sequence via a Dense + Reshape, upscales to ``d_model`` dimensions, then
 applies a per-step linear projection to reconstruct the original features.
 
@@ -32,7 +34,7 @@ Loss         : Mean Squared Error (MSE) over every time step and feature.
 """
 
 
-from keras import Input, Model
+from keras import Input, Model, ops
 from keras import layers
 
 
@@ -94,6 +96,13 @@ def build_transformer(
     # --- Encoder ---
     # Project each time step to the transformer embedding dimension
     x = layers.Dense(d_model, name="enc_embed")(inputs)
+
+    # Learned positional encoding: one d_model-vector per position in the window.
+    # ops.arange produces position indices [0, 1, ..., window_size-1] at graph-build
+    # time; Embedding maps each to a trainable d_model-dimensional vector.
+    # The result broadcasts over the batch dimension automatically.
+    pos_enc = layers.Embedding(input_dim=window_size, output_dim=d_model, name="pos_encoding")
+    x = x + pos_enc(ops.arange(window_size))
 
     # Self-attention sub-layer with residual + LayerNorm
     attn = layers.MultiHeadAttention(

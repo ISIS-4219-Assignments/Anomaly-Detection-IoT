@@ -7,13 +7,13 @@ conv1d.py
 Architecture
 ------------
   → Input   (batch, window, features)
-  → Encoder : Conv1D(32, k=3, same, relu)
-              Conv1D(16, k=3, same, relu)
-              GlobalAveragePooling1D             ← pools time axis → (batch, 16)
+  → Encoder : Conv1D(64, k=3, same, relu)
+              Conv1D(32, k=3, same, relu)
+              GlobalAveragePooling1D             ← pools time axis → (batch, 32)
               Dense(latent_dim, relu)            ← bottleneck
-  → Decoder : Dense(window * 16, relu)
-              Reshape(window, 16)
-              Conv1D(32,       k=3, same, relu)
+  → Decoder : Dense(window * 32, relu)
+              Reshape(window, 32)
+              Conv1D(64,       k=3, same, relu)
               Conv1D(features, k=3, same, linear)
   → Output  (batch, window, features)
 
@@ -46,7 +46,7 @@ def build_conv1d(input_dim: int, window_size: int, latent_dim: int = 16) -> Mode
         value passed to :func:`windowing.create_windows`.
     latent_dim : int, optional
         Size of the Dense bottleneck between the convolutional encoder and
-        decoder.  Default: 32.
+        decoder.  Default: 16.
 
     Returns
     -------
@@ -60,11 +60,11 @@ def build_conv1d(input_dim: int, window_size: int, latent_dim: int = 16) -> Mode
     Notes
     -----
     The encoder uses ``GlobalAveragePooling1D`` instead of ``Flatten`` to
-    collapse the time axis.  This produces a clean ``(batch, 16)`` tensor
-    instead of a ``(batch, window * 16)`` tensor, which sidesteps XLA tiling
+    collapse the time axis.  This produces a clean ``(batch, 32)`` tensor
+    instead of a ``(batch, window * 32)`` tensor, which sidesteps XLA tiling
     failures on newer GPU architectures (e.g. compute capability 12.0+).
-    The decoder's Dense layer projects back to ``window_size * 16`` units and
-    reshapes to ``(window_size, 16)`` before the decoder Conv1D layers.
+    The decoder's Dense layer projects back to ``window_size * 32`` units and
+    reshapes to ``(window_size, 32)`` before the decoder Conv1D layers.
     """
 
     inputs = Input(shape=(window_size, input_dim), name="input")
@@ -72,8 +72,8 @@ def build_conv1d(input_dim: int, window_size: int, latent_dim: int = 16) -> Mode
     # --- Encoder ---
     x = layers.Conv1D(64, kernel_size = 3, padding = "same", activation = "relu", name = "enc_conv_1")(inputs)
     x = layers.Conv1D(32, kernel_size = 3, padding = "same", activation = "relu", name = "enc_conv_2")(x)
-    # GlobalAveragePooling1D averages across the time axis → (batch, 16)
-    # This avoids the (batch, window*16) shape from Flatten that causes XLA tiling issues
+    # GlobalAveragePooling1D averages across the time axis → (batch, 32)
+    # This avoids the (batch, window*32) shape from Flatten that causes XLA tiling issues
     x = layers.GlobalAveragePooling1D(name = "gap")(x)
     encoded = layers.Dense(latent_dim, activation = "relu", name = "bottleneck")(x)
 

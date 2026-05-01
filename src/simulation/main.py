@@ -48,7 +48,7 @@ import os
 
 
 MODEL_TYPE  = "vanilla"  # "vanilla" | "lstm" | "conv1d" | "transformer"
-WINDOW_SIZE = None       # None for vanilla; e.g. 30 for lstm / conv1d
+WINDOW_SIZE = None       # None for vanilla; e.g. 30 for lstm / conv1d / transformer
 
 NUM_ROUNDS    = 3   # federated communication rounds
 LOCAL_EPOCHS  = 5   # local training epochs per round per device (max)
@@ -103,8 +103,7 @@ def _make_paths(device_name: str) -> dict[str, str]:
     Returns
     -------
     dict[str, str]
-        ``{"train": ..., "val": ..., "test": ...}`` with absolute-style
-        paths relative to the working directory.
+        ``{"train": ..., "val": ..., "test": ...}`` with absolute paths.
     """
 
     base = os.path.join(SPLITS_DIR, device_name)
@@ -292,7 +291,7 @@ def _evaluate_global_test(
     if attack_types is not None:
         header = (
             f"  {'Attack Type':<40} {'AUROC':>7} {'PR-AUC':>7} "
-            f"{'Recall':>7} {'F1(bal)':>8} {'Median MSE':>14} {'TP':>7} {'FN':>7} {'n':>7}"
+            f"{'Acc':>7} {'Acc(bal)':>9} {'Recall':>7} {'F1(bal)':>8} {'Median MSE':>14} {'TP':>7} {'FN':>7} {'n':>7}"
         )
         separator = "  " + "-" * (len(header) - 2)
         per_type_lines += [header, separator]
@@ -303,21 +302,24 @@ def _evaluate_global_test(
             n_t      = len(atk_idx)
 
             # threshold-free metrics — full normal pool
-            sub_idx = np.concatenate([atk_idx, normal_idx])
-            y_sub   = y_labels[sub_idx]
-            err_sub = errors[sub_idx]
-            auroc_t = (roc_auc_score(y_sub, err_sub)
-                       if y_sub.sum() > 0 and (y_sub == 0).any() else float("nan"))
-            prauc_t = (average_precision_score(y_sub, err_sub)
-                       if y_sub.sum() > 0 and (y_sub == 0).any() else float("nan"))
+            sub_idx  = np.concatenate([atk_idx, normal_idx])
+            y_sub    = y_labels[sub_idx]
+            pred_sub = y_pred[sub_idx]
+            err_sub  = errors[sub_idx]
+            auroc_t  = (roc_auc_score(y_sub, err_sub)
+                        if y_sub.sum() > 0 and (y_sub == 0).any() else float("nan"))
+            prauc_t  = (average_precision_score(y_sub, err_sub)
+                        if y_sub.sum() > 0 and (y_sub == 0).any() else float("nan"))
+            acc_full_t = accuracy_score(y_sub, pred_sub)
 
             # threshold-based metrics — balanced 1:1 subset
             bal_normal = rng.choice(normal_idx, size=min(n_t, len(normal_idx)), replace=False)
             bal_idx    = np.concatenate([atk_idx, bal_normal])
             y_bal      = y_labels[bal_idx]
             pred_bal   = y_pred[bal_idx]
-            rec_t      = recall_score(y_bal, pred_bal, zero_division=0)
-            f1_t       = f1_score(y_bal, pred_bal, zero_division=0)
+            acc_t  = accuracy_score(y_bal, pred_bal)
+            rec_t  = recall_score(y_bal, pred_bal, zero_division=0)
+            f1_t   = f1_score(y_bal, pred_bal, zero_division=0)
 
             tp_t    = int(np.sum(y_pred[atk_idx] == 1))
             fn_t    = int(np.sum(y_pred[atk_idx] == 0))
@@ -325,10 +327,10 @@ def _evaluate_global_test(
 
             per_type_lines.append(
                 f"  {atype:<40} {auroc_t:>7.4f} {prauc_t:>7.4f} "
-                f"{rec_t:>7.4f} {f1_t:>8.4f} {med_mse:>14.4f} {tp_t:>7} {fn_t:>7} {n_t:>7}"
+                f"{acc_full_t:>7.4f} {acc_t:>9.4f} {rec_t:>7.4f} {f1_t:>8.4f} {med_mse:>14.4f} {tp_t:>7} {fn_t:>7} {n_t:>7}"
             )
         per_type_lines.append(
-            "  * F1(bal) computed on a 1:1 balanced subset (n attack rows : n sampled normal rows)"
+            "  * Acc(bal) and F1(bal) computed on a 1:1 balanced subset (n attack rows : n sampled normal rows)"
         )
 
     # --- Save report ---
@@ -386,6 +388,8 @@ def main() -> None:
     4. Create one :class:`~device.SimulatedDevice` thread per device, each
        pointing at its own private data split.
     5. Start all threads and wait for them to finish.
+    6. Evaluate the final global model on the shared general test set via
+       :func:`_evaluate_global_test`, then save the model to ``src/models/``.
     """
     
     all_paths = [_make_paths(name) for name in DEVICE_NAMES]

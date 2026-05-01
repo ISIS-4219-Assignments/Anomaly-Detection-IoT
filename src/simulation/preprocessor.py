@@ -174,8 +174,8 @@ class IoTPreprocessor:
 
     1. **Column dropping** — removes identifiers, payloads, and port numbers
        listed in :data:`DROP_COLS`.
-    2. **Row cleaning** — drops rows with any null value and removes exact
-       duplicates.
+    2. **Row cleaning** — fills null values in numeric columns with zero and
+       removes exact duplicates.
     3. **One-hot encoding** — expands the string columns in
        :data:`CATEGORICAL_COLS` into binary indicator columns.
     4. **Standard scaling** — zero-centres and unit-variance-scales all
@@ -311,7 +311,7 @@ class IoTPreprocessor:
 
     def _clean(self, df: pd.DataFrame) -> pd.DataFrame:
 
-        """Drop unwanted columns, null rows, and duplicate rows.
+        """Drop unwanted columns, fill null values with zero, and drop duplicate rows.
 
         Parameters
         ----------

@@ -56,6 +56,13 @@ class CentralServer:
         Blocks each device after it submits its update; released only when
         all ``total_clients`` devices have arrived.  Automatically triggers
         :meth:`aggregate_and_update` at that point.
+    model_type : str
+        Architecture name stored so :meth:`save_global_model` can rebuild
+        the correct Keras model.
+    input_dim : int
+        Feature dimension stored for the same reason as ``model_type``.
+    window_size : int or None
+        Sliding-window length stored for the same reason as ``model_type``.
     """
 
     def __init__(
@@ -81,13 +88,13 @@ class CentralServer:
             How many communication rounds to run before stopping.
         model_type : str
             Architecture name forwarded to :func:`~models.factory.build_model`.
-            One of ``"vanilla"``, ``"lstm"``, ``"conv1d"``.
+            One of ``"vanilla"``, ``"lstm"``, ``"conv1d"``, ``"transformer"``.
         input_dim : int
             Number of features after preprocessing.  Passed to the model
             builder to determine layer sizes.
         window_size : int or None
-            Sliding-window length; required for ``"lstm"`` and ``"conv1d"``,
-            ``None`` for ``"vanilla"``.
+            Sliding-window length; required for ``"lstm"``, ``"conv1d"``, and
+            ``"transformer"``; ``None`` for ``"vanilla"``.
         """
 
         # Build a throw-away model to capture the initial weight structure

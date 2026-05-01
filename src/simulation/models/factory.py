@@ -4,10 +4,10 @@ factory.py
 
 Single entry point for model instantiation.
 
-Changing ``MODEL_TYPE`` in ``main.py`` is the *only* change needed to switch
-between architectures.  All other files (``device.py``, ``server.py``) call
-:func:`build_model` and remain completely unaware of which architecture is
-in use.
+Changing ``MODEL_TYPE`` and ``WINDOW_SIZE`` in ``main.py`` is the *only*
+change needed to switch between architectures.  All callers
+(``main.py``, ``device.py``, ``server.py``) go through :func:`build_model`
+and remain completely unaware of which architecture is in use.
 
 Supported model types
 ---------------------

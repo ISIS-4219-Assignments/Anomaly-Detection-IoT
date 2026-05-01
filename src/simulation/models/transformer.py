@@ -10,21 +10,21 @@ Input  (batch, window, features)
   → Encoder : Dense(d_model)                        ← feature projection
               MultiHeadAttention + LayerNorm         ← self-attention block
               FFN(ff_dim → d_model) + LayerNorm      ← feed-forward block
-              GlobalAveragePooling1D                 ← collapse time axis
+              Dense(32, relu)                        ← channel compression
+              GlobalAveragePooling1D                 ← collapse time axis → (batch, 32)
               Dense(latent_dim, relu)                ← bottleneck
-  → Decoder : Dense(window * d_model, relu)
-              Reshape(window, d_model)               ← broadcast back to sequence
-              MultiHeadAttention + LayerNorm         ← self-attention block
-              FFN(ff_dim → d_model) + LayerNorm      ← feed-forward block
+  → Decoder : Dense(window * 32, relu)
+              Reshape(window, 32)                    ← broadcast back to sequence
+              Dense(d_model)                         ← upscale to embedding dim
               TimeDistributed(Dense(features, linear))
   → Output  (batch, window, features)
 
 The encoder projects each time step into a ``d_model``-dimensional space,
 applies one transformer block (self-attention + FFN with residual connections
 and LayerNorm), then pools across the time axis to form a latent vector.
-The decoder projects the latent vector back to a sequence of length
-``window_size`` and applies a symmetric transformer block before the output
-projection.
+The decoder projects the latent vector back to a ``(window_size, 32)``
+sequence via a Dense + Reshape, upscales to ``d_model`` dimensions, then
+applies a per-step linear projection to reconstruct the original features.
 
 Input shape  : (batch_size, window_size, n_features)
 Output shape : (batch_size, window_size, n_features)
@@ -107,12 +107,12 @@ def build_transformer(
     x = layers.LayerNormalization(name="enc_ln_2")(x + ffn)
 
     x = layers.Dense(32, activation="relu", name="enc_fnn_32")(x)
-    # Pool across the time axis → (batch, d_model), then compress to bottleneck
+    # Pool across the time axis → (batch, 32), then compress to bottleneck
     x = layers.GlobalAveragePooling1D(name="gap")(x)
     encoded = layers.Dense(latent_dim, activation="relu", name="bottleneck")(x)
 
     # --- Decoder ---
-    # Expand latent vector back to (batch, window_size, d_model)
+    # Expand latent vector back to (batch, window_size, 32)
     x = layers.Dense(window_size * 32, activation="relu", name="dec_dense")(encoded)
     x = layers.Reshape((window_size, 32), name="reshape")(x)
 

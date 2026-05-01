@@ -8,17 +8,18 @@ Architecture
 ------------
 Input  (batch, window, features)
   → Encoder : LSTM(64, return_sequences=True)
+              LSTM(32, return_sequences=True)
               LSTM(latent_dim, return_sequences=False)   ← bottleneck
-  → Decoder : RepeatVector(window)
-              LSTM(latent_dim, return_sequences=True)
-              LSTM(64,         return_sequences=True)
+  → Decoder : Dense(window * 32, relu)
+              Reshape(window, 32)
+              LSTM(64, return_sequences=True)
               TimeDistributed(Dense(features, linear))
   → Output  (batch, window, features)
 
 The encoder collapses the full window into a single latent vector (the last
-hidden state of the second LSTM).  RepeatVector broadcasts that vector back
-to a sequence of length ``window_size`` so the decoder LSTMs can reconstruct
-each time step independently.
+hidden state of the third LSTM).  The decoder projects that vector back to a
+``(window_size, 32)`` sequence via a Dense + Reshape before passing it to the
+decoder LSTM, which reconstructs each time step independently.
 
 Input shape  : (batch_size, window_size, n_features)
 Output shape : (batch_size, window_size, n_features)

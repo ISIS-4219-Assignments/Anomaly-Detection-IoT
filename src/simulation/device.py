@@ -56,7 +56,8 @@ class SimulatedDevice(threading.Thread):
         Paths to the device's data splits.  Expected keys: ``"train"``,
         ``"val"``, ``"test"``.
     model_type : str
-        Architecture name — one of ``"vanilla"``, ``"lstm"``, ``"conv1d"``.
+        Architecture name — one of ``"vanilla"``, ``"lstm"``, ``"conv1d"``,
+        ``"transformer"``.
     input_dim : int
         Number of features after preprocessing; determines model input size.
     window_size : int or None
@@ -97,7 +98,7 @@ class SimulatedDevice(threading.Thread):
             ``"train"`` and ``"val"`` keys.
         model_type : str
             Architecture to train.  One of ``"vanilla"``, ``"lstm"``,
-            ``"conv1d"``.
+            ``"conv1d"``, ``"transformer"``.
         input_dim : int
             Feature dimension after preprocessing.
         window_size : int or None
@@ -273,22 +274,15 @@ class SimulatedDevice(threading.Thread):
         self._save_results(metrics)
 
 
-    def evaluate(self, global_weights: list[np.ndarray], threshold: float) -> None:
+    def evaluate(self, global_weights: list[np.ndarray], threshold: float) -> dict:
 
         """Evaluate the global model on this device's test split.
 
         Loads the test CSV, applies the fitted scaler from training (no
         re-fitting), optionally windows the data, then computes per-sample
         reconstruction error.  Because the test split contains both normal
-        and attack traffic, the method reports:
-
-        - **normal_mse** — mean reconstruction error on normal samples.
-        - **attack_mse** — mean reconstruction error on attack samples.
-          A well-trained anomaly detector produces a clearly higher value
-          here than ``normal_mse``.
-        - **AUROC** — area under the ROC curve using reconstruction error
-          as the anomaly score.  Threshold-free; 1.0 is perfect, 0.5 is
-          random.
+        and attack traffic, the method reports classification metrics using
+        ``threshold`` to binarise reconstruction errors into anomaly predictions.
 
         For windowed models the label assigned to each window is the label
         of its *last* row (most recent trace in the window).
@@ -298,6 +292,29 @@ class SimulatedDevice(threading.Thread):
         global_weights : list[np.ndarray]
             Final global model weights from the server, in Keras
             ``get_weights()`` format.
+        threshold : float
+            Anomaly decision boundary (reconstruction error). Samples with
+            error above this value are classified as attacks.
+
+        Returns
+        -------
+        dict
+            Dictionary with the following keys:
+
+            - **threshold** — the decision boundary used.
+            - **auroc** — area under the ROC curve (threshold-free; 1.0 is
+              perfect, 0.5 is random).
+            - **prauc** — area under the precision-recall curve.
+            - **accuracy** — fraction of correctly classified samples.
+            - **bal_acc** — balanced accuracy (average of per-class recall).
+            - **precision** — fraction of predicted attacks that are real attacks.
+            - **recall** — fraction of real attacks correctly detected.
+            - **f1** — harmonic mean of precision and recall.
+            - **normal_mse** — median reconstruction error on normal samples.
+            - **attack_mse** — median reconstruction error on attack samples.
+              A well-trained detector produces a clearly higher value here.
+            - **confusion_matrix** — 2×2 ``np.ndarray`` (rows=actual,
+              cols=predicted).
         """
 
         print(f"[Device {self.client_id}] Running test evaluation...")

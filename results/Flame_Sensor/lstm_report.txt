@@ -1,0 +1,24 @@
+Device:        Flame_Sensor
+Architecture:  lstm
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  82
+
+=== Evaluation Results ===
+Threshold:      0.0001
+AUROC:      0.9997
+PR-AUC:     0.9997
+Precision:  0.9661
+Recall:     0.9987
+Acc(bal):   0.9870
+F1(bal):    0.9874
+Normal Median MSE: 0.000033
+Attack Median MSE: 0.002904
+TP:         14930
+FN:         20
+n:          36184
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=20710  FP=524
+  FN=20  TP=14930

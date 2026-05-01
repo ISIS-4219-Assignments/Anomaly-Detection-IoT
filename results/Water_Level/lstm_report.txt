@@ -1,0 +1,24 @@
+Device:        Water_Level
+Architecture:  lstm
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  69
+
+=== Evaluation Results ===
+Threshold:      0.0001
+AUROC:      0.9983
+PR-AUC:     0.9668
+Precision:  0.2136
+Recall:     0.9822
+Acc(bal):   0.9844
+F1(bal):    0.9910
+Normal Median MSE: 0.000032
+Attack Median MSE: 0.002737
+TP:         166
+FN:         3
+n:          45727
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=44947  FP=611
+  FN=3  TP=166

@@ -1,0 +1,38 @@
+=== Global Generalisation Evaluation ===
+Architecture:  conv1d
+Threshold:     0.0019
+AUROC:         0.9999
+PR-AUC:        0.9996
+Precision:     0.9831
+Recall:        0.9995
+Acc(bal):      0.9986
+F1(bal):       0.9986
+Normal Median MSE:    0.000678
+Attack Median MSE:    4.009439
+TP:            29120
+FN:            14
+n:             245199
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=215564  FP=501
+  FN=14  TP=29120
+
+Per-Attack-Type Metrics:
+  Attack Type                                AUROC  PR-AUC  Precision  Recall  Acc(bal)  F1(bal)     Median MSE      TP      FN       n
+  -------------------------------------------------------------------------------------------------------------------------------------
+  Backdoor                                  1.0000  0.9741     0.9951  1.0000    0.9975   0.9975         7.2110     202       0     202
+  DDoS_HTTP                                 0.9968  0.7128     0.9967  0.9868    0.9917   0.9917         0.0050     596       8     604
+  DDoS_ICMP                                 1.0000  1.0000     0.9974  1.0000    0.9987   0.9987         9.3055    6526       0    6526
+  DDoS_TCP                                  1.0000  1.0000     0.9983  1.0000    0.9992   0.9992 188466036736.0000    6617       0    6617
+  DDoS_UDP                                  1.0000  0.9994     0.9972  1.0000    0.9986   0.9986         0.6258   10412       0   10412
+  MITM                                      1.0000  0.9327     0.9831  1.0000    0.9914   0.9915   6081198.0000      58       0      58
+  OS_Fingerprinting                         1.0000  0.9401     1.0000  1.0000    1.0000   1.0000         0.8892      47       0      47
+  Password                                  1.0000  0.9982     0.9990  1.0000    0.9995   0.9995         0.2488    3147       0    3147
+  Port_Scanning                             1.0000  0.9977     1.0000  1.0000    1.0000   1.0000 149137129472.0000     190       0     190
+  Ransomware                                1.0000  0.9729     0.9927  1.0000    0.9963   0.9963         2.6591     136       0     136
+  SQL_injection                             0.9998  0.7338     0.9925  1.0000    0.9962   0.9963         0.0264     266       0     266
+  Uploading                                 0.9991  0.9528     1.0000  0.9838    0.9919   0.9918         0.9647     182       3     185
+  Vulnerability_scanner                     1.0000  0.9996     0.9983  1.0000    0.9992   0.9992        32.0411     591       0     591
+  XSS                                       0.9958  0.6693     1.0000  0.9804    0.9902   0.9901         0.0325     150       3     153
+  * Precision, Acc(bal), and F1(bal) computed on a 1:1 balanced subset (n attack rows : n sampled normal rows)

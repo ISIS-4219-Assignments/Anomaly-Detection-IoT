@@ -1,0 +1,24 @@
+Device:        Distance
+Architecture:  vanilla
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  54
+
+=== Evaluation Results ===
+Threshold:      0.0041
+AUROC:      1.0000
+PR-AUC:     0.9999
+Precision:  0.9956
+Recall:     0.9999
+Acc(bal):   0.9980
+F1(bal):    0.9979
+Normal Median MSE: 0.000428
+Attack Median MSE: 246143.281250
+TP:         20796
+FN:         2
+n:          44036
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=23146  FP=92
+  FN=2  TP=20796

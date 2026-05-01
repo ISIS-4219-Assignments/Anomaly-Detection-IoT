@@ -1,0 +1,24 @@
+Device:        IR_Receiver
+Architecture:  vanilla
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  63
+
+=== Evaluation Results ===
+Threshold:      0.0049
+AUROC:      0.9999
+PR-AUC:     0.9999
+Precision:  0.9864
+Recall:     0.9983
+Acc(bal):   0.9947
+F1(bal):    0.9941
+Normal Median MSE: 0.000614
+Attack Median MSE: 1622.292114
+TP:         16958
+FN:         29
+n:          43137
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=25916  FP=234
+  FN=29  TP=16958

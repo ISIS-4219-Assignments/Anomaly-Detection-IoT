@@ -1,0 +1,24 @@
+Device:        Soil_Moisture
+Architecture:  conv1d
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  108
+
+=== Evaluation Results ===
+Threshold:      0.0006
+AUROC:      1.0000
+PR-AUC:     1.0000
+Precision:  0.9873
+Recall:     0.9999
+Acc(bal):   0.9931
+F1(bal):    0.9936
+Normal Median MSE: 0.000417
+Attack Median MSE: 169159327744.000000
+TP:         23773
+FN:         3
+n:          46163
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=22082  FP=305
+  FN=3  TP=23773

@@ -1,0 +1,24 @@
+Device:        IR_Receiver
+Architecture:  lstm
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  69
+
+=== Evaluation Results ===
+Threshold:      0.0001
+AUROC:      0.9999
+PR-AUC:     0.9999
+Precision:  0.9830
+Recall:     0.9990
+Acc(bal):   0.9939
+F1(bal):    0.9941
+Normal Median MSE: 0.000036
+Attack Median MSE: 0.002002
+TP:         17028
+FN:         17
+n:          43108
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=25769  FP=294
+  FN=17  TP=17028

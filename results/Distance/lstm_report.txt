@@ -1,0 +1,24 @@
+Device:        Distance
+Architecture:  lstm
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  69
+
+=== Evaluation Results ===
+Threshold:      0.0001
+AUROC:      0.9998
+PR-AUC:     0.9998
+Precision:  0.9921
+Recall:     0.9989
+Acc(bal):   0.9959
+F1(bal):    0.9958
+Normal Median MSE: 0.000033
+Attack Median MSE: 0.001030
+TP:         20833
+FN:         23
+n:          44007
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=22985  FP=166
+  FN=23  TP=20833

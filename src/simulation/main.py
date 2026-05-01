@@ -47,7 +47,7 @@ import os
 # ---------------------------------------------------------------------------
 
 
-MODEL_TYPE  = "lstm"  # "vanilla" | "lstm" | "conv1d" | "transformer"
+MODEL_TYPE  = "transformer"  # "vanilla" | "lstm" | "conv1d" | "transformer"
 WINDOW_SIZE = 30       # None for vanilla; e.g. 30 for lstm / conv1d / transformer
 
 NUM_ROUNDS    = 7   # federated communication rounds

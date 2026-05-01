@@ -1,0 +1,19 @@
+=== Network-Level Device Metrics ===
+Architecture:              vanilla
+Devices:                   8
+Total samples:             349097
+Weighted Threshold:        0.004553
+Weighted AUROC:            0.9976
+Weighted PR-AUC:           0.9832
+Accuracy:                  0.9799
+Balanced Accuracy:         0.9803
+Precision:                 0.9655
+Recall:                    0.9821
+F1 Score:                  0.9737
+Weighted Normal Median MSE:0.000528
+Weighted Attack Median MSE:5027623748.991397
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=211870  FP=4655
+  FN=2373  TP=130199

@@ -1,0 +1,24 @@
+Device:        Soil_Moisture
+Architecture:  lstm
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  58
+
+=== Evaluation Results ===
+Threshold:      0.0001
+AUROC:      0.9999
+PR-AUC:     0.9999
+Precision:  0.9906
+Recall:     0.9995
+Acc(bal):   0.9947
+F1(bal):    0.9950
+Normal Median MSE: 0.000048
+Attack Median MSE: 0.001476
+TP:         23765
+FN:         11
+n:          46163
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=22161  FP=226
+  FN=11  TP=23765

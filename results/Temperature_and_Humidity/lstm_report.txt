@@ -1,0 +1,24 @@
+Device:        Temperature_and_Humidity
+Architecture:  lstm
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  28
+
+=== Evaluation Results ===
+Threshold:      0.0001
+AUROC:      0.9998
+PR-AUC:     0.9998
+Precision:  0.5072
+Recall:     0.9998
+Acc(bal):   0.8162
+F1(bal):    0.8466
+Normal Median MSE: 0.000130
+Attack Median MSE: 0.004131
+TP:         12525
+FN:         2
+n:          45651
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=20956  FP=12168
+  FN=2  TP=12525

@@ -1,0 +1,24 @@
+Device:        phValue
+Architecture:  lstm
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  113
+
+=== Evaluation Results ===
+Threshold:      0.0001
+AUROC:      0.9999
+PR-AUC:     0.9999
+Precision:  0.9926
+Recall:     0.9991
+Acc(bal):   0.9960
+F1(bal):    0.9960
+Normal Median MSE: 0.000043
+Attack Median MSE: 0.002297
+TP:         13343
+FN:         12
+n:          27468
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=14014  FP=99
+  FN=12  TP=13343

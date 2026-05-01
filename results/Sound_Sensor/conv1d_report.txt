@@ -1,0 +1,24 @@
+Device:        Sound_Sensor
+Architecture:  conv1d
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  108
+
+=== Evaluation Results ===
+Threshold:      0.0006
+AUROC:      1.0000
+PR-AUC:     1.0000
+Precision:  0.9932
+Recall:     1.0000
+Acc(bal):   0.9966
+F1(bal):    0.9966
+Normal Median MSE: 0.000374
+Attack Median MSE: 23.636002
+TP:         30300
+FN:         0
+n:          60557
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=30051  FP=206
+  FN=0  TP=30300

@@ -175,12 +175,6 @@ data/attack_traffic/
 data/normal_traffic/
 data/splits/*
 
-# Ignore results files
-results/*
-
-# Ignore models files
-src/models/*
-
 # Claude init file
 CLAUDE.md
 

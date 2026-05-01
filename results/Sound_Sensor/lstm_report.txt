@@ -1,0 +1,24 @@
+Device:        Sound_Sensor
+Architecture:  lstm
+Rounds:        7
+Local epochs:  20 (max, early stopping patience=3)
+Total epochs:  82
+
+=== Evaluation Results ===
+Threshold:      0.0001
+AUROC:      1.0000
+PR-AUC:     1.0000
+Precision:  0.9957
+Recall:     0.9993
+Acc(bal):   0.9975
+F1(bal):    0.9975
+Normal Median MSE: 0.000038
+Attack Median MSE: 0.001597
+TP:         30280
+FN:         20
+n:          60557
+
+Confusion Matrix:
+  (rows=actual, cols=predicted)
+  TN=30126  FP=131
+  FN=20  TP=30280

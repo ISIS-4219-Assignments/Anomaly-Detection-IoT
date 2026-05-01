@@ -18,7 +18,7 @@ All inter-device communication goes through :class:`~server.CentralServer`.
 
 
 from sklearn.metrics import (roc_auc_score, average_precision_score,
-                             accuracy_score, balanced_accuracy_score,
+                             balanced_accuracy_score,
                              precision_score, recall_score, f1_score,
                              confusion_matrix)
 
@@ -303,6 +303,7 @@ class SimulatedDevice(threading.Thread):
         dict
             Dictionary with the following keys:
 
+            - **threshold** — the anomaly decision boundary used.
             - **auroc** — area under the ROC curve (threshold-free; 1.0 is
               perfect, 0.5 is random).
             - **prauc** — area under the precision-recall curve.
@@ -311,9 +312,9 @@ class SimulatedDevice(threading.Thread):
             - **bal_acc** — balanced accuracy (average of per-class recall).
             - **f1_bal** — F1 score on a 1:1 balanced subset of normal and
               attack samples.
-            - **attack_mse** — median reconstruction error on attack samples
-              (Median MSE); a well-trained detector produces a clearly higher
-              value here than on normal samples.
+            - **normal_mse** — median squared error on normal samples.
+            - **attack_mse** — median squared error on attack samples; a
+              well-trained detector produces a clearly higher value here.
             - **tp** — number of correctly detected attacks.
             - **fn** — number of missed attacks.
             - **n** — total number of test samples.
@@ -342,7 +343,7 @@ class SimulatedDevice(threading.Thread):
         with self.gpu_lock:
             X_pred = model.predict(X_test, batch_size = 256, verbose = 0)
 
-        # Per-sample reconstruction error (MSE averaged over all non-batch dims)
+        # Per-sample reconstruction error (median squared error over all non-batch dims)
         axes = tuple(range(1, X_test.ndim))  # (1,) for vanilla; (1, 2) for sequence
         errors = np.median((X_test - X_pred) ** 2, axis = axes)
         
@@ -383,7 +384,7 @@ class SimulatedDevice(threading.Thread):
 
         print(
             f"[Device {self.client_id}] Test results — "
-            f"Threshold: {threshold:.4f}"
+            f"Threshold: {threshold:.4f} | "
             f"AUROC: {auroc:.4f} | PR-AUC: {prauc:.4f} | "
             f"Precision: {precision:.4f} | Recall: {recall:.4f} | "
             f"Acc(bal): {bal_acc:.4f} | F1(bal): {f1_bal:.4f} | "

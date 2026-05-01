@@ -262,10 +262,8 @@ def _evaluate_global_test(
 
     normal_mse  = float(np.median(errors[normal_mask])) if normal_mask.any() else float("nan")
     attack_mse  = float(np.median(errors[attack_mask])) if attack_mask.any() else float("nan")
-    accuracy    = accuracy_score(y_labels, y_pred)
     precision   = precision_score(y_labels, y_pred, zero_division=0)
     recall_val  = recall_score(y_labels, y_pred, zero_division=0)
-    f1          = f1_score(y_labels, y_pred, zero_division=0)
     cm          = confusion_matrix(y_labels, y_pred)
     auroc       = (roc_auc_score(y_labels, errors)
                    if normal_mask.any() and attack_mask.any() else float("nan"))
@@ -290,8 +288,8 @@ def _evaluate_global_test(
         f1_bal_g = float("nan")
 
     print(
-        f"Threshold: {threshold:.4f}"
-        f"[Global Eval] AUROC: {auroc:.4f} | PR-AUC: {prauc:.4f} | "
+        f"[Global Eval] Threshold: {threshold:.4f} | "
+        f"AUROC: {auroc:.4f} | PR-AUC: {prauc:.4f} | "
         f"Precision: {precision:.4f} | Recall: {recall_val:.4f} | "
         f"Acc(bal): {bal_acc:.4f} | F1(bal): {f1_bal_g:.4f} | "
         f"Normal Median MSE: {normal_mse:.6f} | "
@@ -323,7 +321,6 @@ def _evaluate_global_test(
             # threshold-free metrics — full normal pool
             sub_idx  = np.concatenate([atk_idx, normal_idx])
             y_sub    = y_labels[sub_idx]
-            pred_sub = y_pred[sub_idx]
             err_sub  = errors[sub_idx]
             auroc_t  = (roc_auc_score(y_sub, err_sub)
                         if y_sub.sum() > 0 and (y_sub == 0).any() else float("nan"))

@@ -44,7 +44,8 @@ MODEL_TYPE  = "conv1d"  # "vanilla" | "lstm" | "conv1d" | "transformer"
 WINDOW_SIZE = 30       # None for vanilla; e.g. 30 for lstm / conv1d
 
 NUM_ROUNDS    = 7   # federated communication rounds
-LOCAL_EPOCHS  = 15   # local training epochs per round per device
+LOCAL_EPOCHS  = 15   # local training epochs per round per device (max)
+EARLY_STOPPING_PATIENCE = 3  # stop early if val_loss stalls; 0 to disable
 
 # Devices whose splits will participate in this run.
 # Each name must match a subdirectory under data/splits/.
@@ -181,8 +182,9 @@ def main() -> None:
             input_dim        = input_dim,
             window_size      = WINDOW_SIZE,
             known_categories = known_categories,
-            local_epochs     = LOCAL_EPOCHS,
-            gpu_lock         = gpu_lock,
+            local_epochs             = LOCAL_EPOCHS,
+            early_stopping_patience  = EARLY_STOPPING_PATIENCE,
+            gpu_lock                 = gpu_lock,
             results_dir      = RESULTS_DIR,
         )
         for name, paths in zip(DEVICE_NAMES, all_paths)

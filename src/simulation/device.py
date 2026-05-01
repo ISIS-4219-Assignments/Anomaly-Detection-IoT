@@ -18,6 +18,7 @@ All inter-device communication goes through :class:`~server.CentralServer`.
 
 
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, confusion_matrix
+from keras.callbacks import EarlyStopping
 from preprocessor import IoTPreprocessor
 from models.factory import build_model
 from windowing import create_windows
@@ -72,6 +73,7 @@ class SimulatedDevice(threading.Thread):
         window_size: int | None = None,
         known_categories: dict | None = None,
         local_epochs: int = 5,
+        early_stopping_patience: int = 3,
         gpu_lock: threading.Lock | None = None,
         results_dir: str | None = None,
     ):
@@ -102,6 +104,11 @@ class SimulatedDevice(threading.Thread):
             produce a different feature space across devices.
         local_epochs : int, optional
             How many epochs to train in each federated round.  Default: 5.
+        early_stopping_patience : int, optional
+            Stop a local training round early if val_loss does not improve by
+            at least 1e-4 for this many consecutive epochs.  Weights are
+            restored to the best epoch before the update is sent to the server.
+            Set to 0 to disable early stopping.  Default: 3.
         """
 
         super().__init__()
@@ -113,6 +120,7 @@ class SimulatedDevice(threading.Thread):
         self.window_size = window_size
         self.known_categories = known_categories
         self.local_epochs = local_epochs
+        self.early_stopping_patience = early_stopping_patience
         self.gpu_lock = gpu_lock or threading.Lock()
         self.results_dir = results_dir
         self._train_losses: list[float] = []
@@ -201,14 +209,25 @@ class SimulatedDevice(threading.Thread):
             model.set_weights(self.server.global_model)
 
             # Train locally; autoencoder target is the input itself
+            callbacks = []
+            if self.early_stopping_patience > 0:
+                callbacks.append(EarlyStopping(
+                    monitor            = "val_loss",
+                    patience           = self.early_stopping_patience,
+                    min_delta          = 1e-4,
+                    restore_best_weights = True,
+                    verbose            = 0,
+                ))
+
             with self.gpu_lock:
                 history = model.fit(
                     X_train,
                     X_train,
                     validation_data = (X_val, X_val),
-                    epochs = self.local_epochs,
-                    batch_size = 64,
-                    verbose = 0,
+                    epochs          = self.local_epochs,
+                    batch_size      = 64,
+                    callbacks       = callbacks,
+                    verbose         = 0,
                 )
 
             self._train_losses.extend(history.history["loss"])
@@ -372,8 +391,8 @@ class SimulatedDevice(threading.Thread):
             f"Device:        {self.client_id}\n"
             f"Architecture:  {self.model_type}\n"
             f"Rounds:        {rounds}\n"
-            f"Local epochs:  {self.local_epochs}\n"
-            f"Total epochs:  {rounds * self.local_epochs}\n"
+            f"Local epochs:  {self.local_epochs} (max, early stopping patience={self.early_stopping_patience})\n"
+            f"Total epochs:  {len(self._train_losses)}\n"
             f"\n"
             f"=== Evaluation Results ===\n"
             f"Threshold:         {metrics['threshold']:.6f}\n"

@@ -40,9 +40,9 @@ class CentralServer:
         Current global model weights in Keras ``get_weights()`` format.
         Initialised from a freshly-built model so the weight structure is
         always consistent with the chosen architecture.
-    updates : list[list[np.ndarray]]
-        Local weight updates collected during the current round.  Cleared
-        after every aggregation.
+    updates : list[tuple[list[np.ndarray], int]]
+        Local weight updates collected during the current round, stored as
+        ``(weights, n_samples)`` tuples.  Cleared after every aggregation.
     lock : threading.Lock
         Guards appends to ``updates`` so concurrent device threads cannot
         corrupt the list.

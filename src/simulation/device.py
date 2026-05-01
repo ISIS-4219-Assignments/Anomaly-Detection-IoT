@@ -250,7 +250,7 @@ class SimulatedDevice(threading.Thread):
                 "Sending weights to server..."
             )
 
-                # Submit weights and block at the barrier until all devices finish
+            # Submit weights and block at the barrier until all devices finish
             self.server.receive_update(self.client_id, model.get_weights(), self._n_train_samples)
 
         # ---- Threshold phase ----

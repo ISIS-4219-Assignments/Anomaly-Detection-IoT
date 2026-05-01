@@ -57,12 +57,6 @@ source env/bin/activate        # Windows: env\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Configure Kaggle credentials
-
-The download script uses the Kaggle API. Place your `kaggle.json` API token at `~/.config/kaggle/kaggle.json` (Linux/Mac) or `%USERPROFILE%\.kaggle\kaggle.json` (Windows).
-
-You can download the token from your [Kaggle account settings](https://www.kaggle.com/settings) under **API → Create New Token**.
-
 ---
 
 ## Step-by-Step Execution
@@ -165,7 +159,7 @@ After the simulation completes:
 
 | Path | Contents |
 |------|----------|
-| `src/models/<model_type>_global_model.keras` | Final global model weights |
+| `src/models/<model_type>_autoencoder_final.keras` | Final global model weights |
 | `results/<model_type>_network_report.txt` | Aggregated per-device metrics (AUROC, F1, confusion matrix) |
 | `results/<model_type>_global_report.txt` | General test set evaluation with per-attack-type breakdown |
 

@@ -111,11 +111,11 @@ def build_transformer(
     x = layers.LayerNormalization(name="enc_ln_1")(x + attn)
 
     # Feed-forward sub-layer with residual + LayerNorm
-    ffn = layers.Dense(128, activation="relu", name="enc_ffn_intermediate")(x)
+    ffn = layers.Dense(ff_dim, activation="relu", name="enc_ffn_intermediate")(x)
     ffn = layers.Dense(d_model, name="enc_ffn_out")(ffn)
     x = layers.LayerNormalization(name="enc_ln_2")(x + ffn)
 
-    x = layers.Dense(32, activation="relu", name="enc_fnn_32")(x)
+    x = layers.Dense(32, activation="relu", name="enc_ffn_32")(x)
     # Pool across the time axis → (batch, 32), then compress to bottleneck
     x = layers.GlobalAveragePooling1D(name="gap")(x)
     encoded = layers.Dense(latent_dim, activation="relu", name="bottleneck")(x)

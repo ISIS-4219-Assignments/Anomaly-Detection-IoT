@@ -264,6 +264,28 @@ def main() -> None:
             hide_index=True,
         )
 
+    st.divider()
+    st.markdown("#### Simulación de red")
+    st.caption(
+        "Paquetes fluyendo desde Internet hacia los dispositivos IoT.  "
+        "El color de los dispositivos se va enrojeciendo al acumular ataques.  "
+        "Presiona ▶ Reproducir para iniciar."
+    )
+
+    from attack_animation import build_attack_animation
+
+    _DISPLAY_DEVICES = [
+        "Distance", "Flame_Sensor", "IR_Receiver", "Sound_Sensor", "Water_Level"
+    ]
+    st.plotly_chart(
+        build_attack_animation(
+            device_names=_DISPLAY_DEVICES,
+            anomaly=anomaly,
+            errors=errors,
+        ),
+        use_container_width=True,
+    )
+
 
 if __name__ == "__main__":
     main()

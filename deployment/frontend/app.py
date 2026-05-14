@@ -41,8 +41,8 @@ def _load_model():
 
 
 @st.cache_resource(show_spinner="Cargando preprocesador…")
-def _load_preprocessor():
-    """Load and cache the global IoTPreprocessor from the pickle cache."""
+def _load_cached_preprocessor():
+    """Load the global IoTPreprocessor from the pickle cache, or None if absent."""
     if not _PREPROCESSOR_PATH.exists():
         return None
     with open(_PREPROCESSOR_PATH, "rb") as f:
@@ -50,15 +50,18 @@ def _load_preprocessor():
     return cache["preprocessor"]
 
 
-def _preprocess(df: pd.DataFrame, preprocessor) -> np.ndarray:
+def _preprocess(df: pd.DataFrame) -> np.ndarray:
     """Transform a raw CSV DataFrame into windowed model input.
+
+    Uses the cached global preprocessor when available; otherwise fits a local
+    preprocessor directly on the uploaded DataFrame (no known_categories).
+    The latter works correctly as long as the CSV covers all categorical values
+    present in the training set — i.e. any standard EdgeIIoTSet file.
 
     Parameters
     ----------
     df : pd.DataFrame
         Raw network traffic rows in EdgeIIoTSet format.
-    preprocessor : IoTPreprocessor
-        Fitted global preprocessor loaded from cache.
 
     Returns
     -------
@@ -66,8 +69,16 @@ def _preprocess(df: pd.DataFrame, preprocessor) -> np.ndarray:
         Shape (n_windows, window_size, n_features) ready for model.predict().
     """
     from windowing import create_windows
+    from preprocessor import IoTPreprocessor
 
-    X, _ = preprocessor.transform(df)
+    preprocessor = _load_cached_preprocessor()
+
+    if preprocessor is not None:
+        X, _ = preprocessor.transform(df)
+    else:
+        pre = IoTPreprocessor(known_categories=None)
+        X, _ = pre.fit_transform(df)
+
     X_arr = X.values.astype("float32")
     return create_windows(X_arr, _WINDOW_SIZE)
 
@@ -166,17 +177,15 @@ def main() -> None:
         "EdgeIIoTSet dataset · 14 tipos de ataque"
     )
 
-    preprocessor = _load_preprocessor()
-
-    if preprocessor is None:
-        st.error(
-            "Preprocesador no encontrado. "
-            "Ejecuta `python deployment/generate_preprocessor.py` una vez "
-            "y luego sube `deployment/preprocessor_cache.pkl` al repositorio."
-        )
-        return
-
     model = _load_model()
+
+    if not _PREPROCESSOR_PATH.exists():
+        st.info(
+            "No se encontró caché de preprocesador — se ajustará sobre el CSV subido. "
+            "Para máxima precisión ejecuta `python deployment/generate_preprocessor.py` "
+            "con los datos de entrenamiento y sube `deployment/preprocessor_cache.pkl`.",
+            icon="ℹ️",
+        )
 
     with st.sidebar:
         st.markdown("### Modelo")
@@ -217,7 +226,7 @@ def main() -> None:
                 )
                 return
 
-            X_windows = _preprocess(df, preprocessor)
+            X_windows = _preprocess(df)
             errors, threshold = _run_inference(X_windows, model)
             anomaly = (errors > threshold).astype(int)
 

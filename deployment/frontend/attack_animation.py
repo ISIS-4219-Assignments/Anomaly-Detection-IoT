@@ -156,7 +156,7 @@ def _server_trace(receiving_attack: bool) -> go.Scatter:
         mode="markers+text",
         marker=dict(size=52, color=color, symbol="square",
                     line=dict(width=3, color="white")),
-        text=["🗄️"],
+        text=["SRV"],
         textposition="middle center",
         textfont=dict(size=20),
         hovertext=["<b>Servidor Central</b>"],
@@ -285,7 +285,7 @@ def build_attack_animation(
         height=520,
         margin=dict(l=10, r=10, t=50, b=60),
         title=dict(
-            text="Red IoT → Servidor Central — 🔴 Ataque  🟢 Normal",
+            text="Red IoT - Servidor Central — Ataque (rojo)  Normal (verde)",
             font=dict(size=14, color="#2c3e50"),
             x=0.5,
         ),
@@ -297,14 +297,14 @@ def build_attack_animation(
             "xanchor": "center",
             "buttons": [
                 {
-                    "label": "▶  Reproducir",
+                    "label": "Reproducir",
                     "method": "animate",
                     "args": [None, {"frame": {"duration": _FRAME_MS, "redraw": True},
                                     "fromcurrent": True,
                                     "transition": {"duration": 0}}],
                 },
                 {
-                    "label": "⏸  Pausar",
+                    "label": "Pausar",
                     "method": "animate",
                     "args": [[None], {"frame": {"duration": 0, "redraw": False},
                                       "mode": "immediate",

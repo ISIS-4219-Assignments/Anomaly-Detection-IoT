@@ -50,8 +50,8 @@ _DEVICE_NAMES = [
 ]
 
 _DEVICE_ICONS = [
-    "🌡️", "📷", "📡", "💡", "🔐", "📶", "💨", "🌿",
-    "❄️", "🔌", "👁️", "🔗", "📨", "☀️",
+    "[THR]", "[CAM]", "[SNS]", "[LUZ]", "[CER]", "[RTR]", "[GAS]", "[CO2]",
+    "[HVC]", "[INT]", "[MOV]", "[GWY]", "[MQT]", "[SOL]",
 ]
 
 _ATTACK_LABELS = {
@@ -94,14 +94,14 @@ def _device_name_from_file(filename: str, index: int) -> str:
     return _DEVICE_NAMES[index % len(_DEVICE_NAMES)]
 
 
-@st.cache_resource(show_spinner="Cargando modelo Conv1D…")
+@st.cache_resource(show_spinner="Cargando modelo Conv1D...")
 def _load_model():
     """Load and cache the Conv1D autoencoder from the repository."""
     import keras
     return keras.models.load_model(str(_MODEL_PATH))
 
 
-@st.cache_resource(show_spinner="Cargando preprocesador…")
+@st.cache_resource(show_spinner="Cargando preprocesador...")
 def _load_cached_preprocessor():
     """Return the cached IoTPreprocessor, or None if the cache file is absent."""
     if not _PREPROCESSOR_PATH.exists():
@@ -178,7 +178,7 @@ def _stream_inference(
     estimated_chunks = max(file_size // (_CHUNK_SIZE * 200), 1)
     chunks_done = 0
 
-    bar = st.progress(0, text="Procesando archivo completo…")
+    bar = st.progress(0, text="Procesando archivo completo...")
 
     try:
         for chunk in pd.read_csv(uploaded_file, chunksize=_CHUNK_SIZE, low_memory=False):
@@ -275,7 +275,7 @@ def _process_uploads(uploaded_files: list, model, threshold_cache: dict | None) 
         is_large = uf.size >= _LARGE_FILE_THRESHOLD and preprocessor is not None
 
         if is_large:
-            st.caption(f"📦 '{uf.name}' ({uf.size / 1e6:.0f} MB) — procesando en chunks…")
+            st.caption(f"'{uf.name}' ({uf.size / 1e6:.0f} MB) — procesando en chunks...")
             result = _stream_inference(uf, preprocessor, model, uf.size, dev_threshold)
             if result is None:
                 return None
@@ -363,7 +363,7 @@ def _process_uploads(uploaded_files: list, model, threshold_cache: dict | None) 
                     "ataque": dev["attack_label"],
                     "ventana": win_idx + 1,
                     "mse": round(float(dev["errors"][win_idx]), 8),
-                    "clasificacion": "🔴 Ataque" if dev["anomaly"][win_idx] == 1 else "🟢 Normal",
+                    "clasificacion": "Ataque" if dev["anomaly"][win_idx] == 1 else "Normal",
                 })
                 all_errors_list.append(float(dev["errors"][win_idx]))
                 all_anomaly_list.append(int(dev["anomaly"][win_idx]))
@@ -450,7 +450,7 @@ def _live_cards_html(devices_info: list[dict], live_counts: dict) -> str:
     text-align:center;
     flex:1;
 ">
-    <div style="font-size:1.4rem;">{dev['icon']}</div>
+    <div style="font-size:0.7rem;font-weight:700;color:#95a5a6;">{dev['icon']}</div>
     <div style="color:#ecf0f1;font-size:0.68rem;font-weight:600;margin:2px 0;">
         {name.replace('_', ' ')}
     </div>
@@ -483,7 +483,7 @@ def _run_live_simulation(data: dict, speed_wps: int) -> None:
 
     col_chart, col_now = st.columns([3, 1])
     with col_chart:
-        st.caption("Error de reconstrucción (MSE) — 🔴 Ataque  🟢 Normal")
+        st.caption("Error de reconstruccion (MSE) — Ataque (rojo)  Normal (verde)")
         chart_ph = st.empty()
     with col_now:
         st.caption("Última clasificación")
@@ -512,7 +512,7 @@ def _run_live_simulation(data: dict, speed_wps: int) -> None:
             live_counts[dev]["n_anomaly"] += 1
 
         badge_color = "#e74c3c" if anom else "#2ecc71"
-        badge_label = "🔴 ATAQUE DETECTADO" if anom else "🟢 Normal"
+        badge_label = "ATAQUE DETECTADO" if anom else "Normal"
         progress_pct = int(100 * (i + 1) / n_total)
         badge_ph.markdown(
             f"""
@@ -556,7 +556,7 @@ def _run_live_simulation(data: dict, speed_wps: int) -> None:
     padding:12px 8px;
     text-align:center;
 ">
-    <div style="font-size:1.8rem;">{"🔴" if anom else "🟢"}</div>
+    <div style="font-size:1.8rem;">{"[!]" if anom else "[OK]"}</div>
     <div style="color:{now_color};font-weight:700;font-size:0.9rem;">
         {"Ataque" if anom else "Normal"}
     </div>
@@ -586,7 +586,7 @@ def _run_live_simulation(data: dict, speed_wps: int) -> None:
     padding:10px 20px;
     margin-bottom:6px;
 ">
-    <span style="color:#27ae60;font-weight:800;font-size:1.05rem;">✅ Simulación completada</span>
+    <span style="color:#27ae60;font-weight:800;font-size:1.05rem;">Simulacion completada</span>
     <span style="color:#bdc3c7;margin-left:12px;font-size:0.85rem;">
         {n_total} ventanas analizadas · <b>{total_attacks}</b> ataques detectados
     </span>
@@ -615,7 +615,7 @@ def _render_device_card(col, dev: dict) -> None:
     text-align: center;
     margin-bottom: 8px;
 ">
-    <div style="font-size: 2rem; margin-bottom: 6px;">{dev['icon']}</div>
+    <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 6px; color: #95a5a6;">{dev['icon']}</div>
     <div style="color: #ecf0f1; font-weight: 600; font-size: 0.82rem;
                 margin-bottom: 8px; word-break: break-word;">
         {dev['name'].replace('_', ' ')}
@@ -658,32 +658,28 @@ def _upload_prompt() -> None:
     border: 1px solid #2c3e50;
     margin: 20px 0;
 ">
-    <div style="font-size: 4rem; margin-bottom: 16px;">🔒</div>
-    <h2 style="color: #ecf0f1; margin-bottom: 8px;">Sube tus archivos de tráfico</h2>
+    <h2 style="color: #ecf0f1; margin-bottom: 8px;">Sube tus archivos de trafico</h2>
     <p style="color: #95a5a6; font-size: 0.95rem; max-width: 560px; margin: 0 auto 16px auto;">
         Usa el panel lateral para cargar uno o varios CSV del dataset
         <b style="color:#ecf0f1;">EdgeIIoTSet</b>.
         Para ver clasificaciones mixtas (normal + ataque), sube archivos de
         <b style="color:#3498db;">test o combinados</b>.
-        Con archivos de ataque puro, todas las ventanas resultarán anomalías.
+        Con archivos de ataque puro, todas las ventanas resultaran anomalias.
     </p>
     <div style="display: flex; justify-content: center; gap: 32px; margin-top: 20px; flex-wrap: wrap;">
         <div style="text-align:center;">
-            <div style="font-size:1.8rem;">✅</div>
             <div style="color:#3498db; font-weight:600; font-size:0.85rem;">Recomendado</div>
-            <div style="color:#95a5a6; font-size:0.75rem;">CSV de test / tráfico mixto</div>
+            <div style="color:#95a5a6; font-size:0.75rem;">CSV de test / trafico mixto</div>
         </div>
         <div style="color:#7f8c8d; font-size:1.5rem; align-self:center;">·</div>
         <div style="text-align:center;">
-            <div style="font-size:1.8rem;">⚠️</div>
-            <div style="color:#ecf0f1; font-weight:600; font-size:0.85rem;">También válido</div>
-            <div style="color:#95a5a6; font-size:0.75rem;">CSV de ataque puro (100% anomalías)</div>
+            <div style="color:#ecf0f1; font-weight:600; font-size:0.85rem;">Tambien valido</div>
+            <div style="color:#95a5a6; font-size:0.75rem;">CSV de ataque puro (100% anomalias)</div>
         </div>
         <div style="color:#7f8c8d; font-size:1.5rem; align-self:center;">·</div>
         <div style="text-align:center;">
-            <div style="font-size:1.8rem;">📄×{_MAX_DEVICES}</div>
             <div style="color:#ecf0f1; font-weight:600; font-size:0.85rem;">hasta {_MAX_DEVICES} archivos</div>
-            <div style="color:#95a5a6; font-size:0.75rem;">Varios dispositivos simultáneos</div>
+            <div style="color:#95a5a6; font-size:0.75rem;">Varios dispositivos simultaneos</div>
         </div>
     </div>
     <div style="margin-top: 24px; color: #7f8c8d; font-size: 0.78rem;">
@@ -718,14 +714,14 @@ def main() -> None:
     """Entry point for the IoT network-attack simulation Streamlit dashboard."""
     st.set_page_config(
         page_title="IoT Attack Monitor",
-        page_icon="🔒",
+        page_icon=":lock:",
         layout="wide",
     )
 
     model = _load_model()
 
     with st.sidebar:
-        st.markdown("## 🔒 IoT Attack Monitor")
+        st.markdown("## IoT Attack Monitor")
         st.divider()
 
         st.markdown("### Modelo")
@@ -737,25 +733,25 @@ def main() -> None:
 
         st.divider()
 
-        st.markdown("### ⚡ Velocidad de simulación")
+        st.markdown("### Velocidad de simulacion")
         speed_wps = st.select_slider(
             "Ventanas por segundo",
             options=[2, 5, 10, 20, 50, 100],
             value=10,
             label_visibility="collapsed",
         )
-        st.caption(f"**{speed_wps} ventanas/seg** — la simulación muestra cada clasificación en tiempo real.")
+        st.caption(f"**{speed_wps} ventanas/seg** — la simulacion muestra cada clasificacion en tiempo real.")
 
         st.divider()
 
-        st.markdown("### 📂 Cargar datos")
+        st.markdown("### Cargar datos")
         st.caption(
-            f"Sube **1–{_MAX_DEVICES} archivos** CSV (un dispositivo por archivo, máx. 1 GB c/u). "
-            "Para ver tráfico mixto, usa archivos de **test** o combinados del dataset."
+            f"Sube **1-{_MAX_DEVICES} archivos** CSV (un dispositivo por archivo, max. 1 GB c/u). "
+            "Para ver trafico mixto, usa archivos de **test** o combinados del dataset."
         )
 
         uploaded_files = st.file_uploader(
-            label="Selecciona CSV(s) de tráfico de red",
+            label="Selecciona CSV(s) de trafico de red",
             type=["csv"],
             accept_multiple_files=True,
             label_visibility="collapsed",
@@ -763,22 +759,22 @@ def main() -> None:
 
         if uploaded_files:
             if len(uploaded_files) > _MAX_DEVICES:
-                st.warning(f"Máximo {_MAX_DEVICES} archivos a la vez — se usarán los primeros {_MAX_DEVICES}.")
+                st.warning(f"Maximo {_MAX_DEVICES} archivos a la vez — se usaran los primeros {_MAX_DEVICES}.")
                 uploaded_files = uploaded_files[:_MAX_DEVICES]
             st.caption(f"{len(uploaded_files)} archivo(s) cargado(s):")
             for uf in uploaded_files:
                 label = _ATTACK_LABELS.get(uf.name, uf.name)
-                st.caption(f"  • {label}")
+                st.caption(f"  - {label}")
 
-            if st.button("🔄 Limpiar y cargar otros", use_container_width=True):
+            if st.button("Limpiar y cargar otros", use_container_width=True):
                 for key in list(st.session_state.keys()):
-                    if key.startswith("result_") or key.endswith("_sim_done"):
+                    if key.startswith("result_") or key.endswith("_sim_done") or key.endswith("_sim_started"):
                         del st.session_state[key]
                 st.rerun()
 
-    st.title("🔒 IoT Network Attack Monitor")
+    st.title("IoT Network Attack Monitor")
     st.caption(
-        "Detección de anomalías IoT con Conv1D autoencoder federado — "
+        "Deteccion de anomalias IoT con Conv1D autoencoder federado — "
         "EdgeIIoTSet dataset · 14 tipos de ataque"
     )
 
@@ -790,7 +786,7 @@ def main() -> None:
 
     cache_key = "result_" + "_".join(f"{uf.name}_{uf.size}" for uf in uploaded_files)
     if cache_key not in st.session_state:
-        with st.spinner(f"⚙️ Procesando {len(uploaded_files)} archivo(s)…"):
+        with st.spinner(f"Procesando {len(uploaded_files)} archivo(s)..."):
             st.session_state[cache_key] = _process_uploads(uploaded_files, model, threshold_cache)
 
     data = st.session_state[cache_key]
@@ -809,34 +805,43 @@ def main() -> None:
     col_m4.metric("Dispositivos bajo ataque", devs_under_attack)
 
     if threshold_cache is not None:
-        global_thr = threshold_cache.get("threshold", "—")
+        global_thr = threshold_cache.get("threshold", "-")
         st.success(
-            f"✅ **Umbral del modelo cargado** (global: `{global_thr}`, "
-            "por dispositivo: 0.0006–0.0008) — leído directamente de los resultados de entrenamiento FL. "
+            f"**Umbral del modelo cargado** (global: `{global_thr}`, "
+            "por dispositivo: 0.0006-0.0008) — leido directamente de los resultados de entrenamiento FL. "
             "Clasificaciones absolutas, no relativas a los datos subidos."
         )
     else:
         st.warning(
-            "⚠️ **Umbral relativo** — `threshold_cache.pkl` no encontrado. "
+            "**Umbral relativo** — `threshold_cache.pkl` no encontrado. "
             "Siempre se marca el 1% con mayor MSE independientemente del contenido."
         )
 
     st.markdown("---")
 
     sim_done_key = cache_key + "_sim_done"
+    sim_started_key = cache_key + "_sim_started"
 
-    if sim_done_key not in st.session_state:
-        st.markdown("### 📡 Clasificando tráfico en tiempo real…")
+    if sim_done_key not in st.session_state and sim_started_key not in st.session_state:
+        st.info("Archivos procesados. Presiona 'Iniciar simulacion' para comenzar.")
+        if st.button("Iniciar simulacion", type="primary", use_container_width=False):
+            st.session_state[sim_started_key] = True
+            st.rerun()
+
+    elif sim_started_key in st.session_state and sim_done_key not in st.session_state:
+        st.markdown("### Clasificando trafico en tiempo real...")
         _run_live_simulation(data, speed_wps)
         st.session_state[sim_done_key] = True
+        del st.session_state[sim_started_key]
         st.rerun()
+
     else:
         col_btn, _ = st.columns([1, 4])
-        if col_btn.button("▶ Repetir simulación", use_container_width=True):
+        if col_btn.button("Repetir simulacion", use_container_width=True):
             del st.session_state[sim_done_key]
             st.rerun()
 
-        st.markdown("#### Topología de red — reproducción completa")
+        st.markdown("#### Topologia de red — reproduccion completa")
         _render_final_network(data)
 
         st.markdown("#### Estado final de dispositivos")

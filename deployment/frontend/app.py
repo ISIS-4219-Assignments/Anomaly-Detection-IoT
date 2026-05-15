@@ -2,18 +2,18 @@
 
 Live network-attack simulation dashboard for the FL IoT Anomaly Detection system.
 
-The user uploads a CSV in EdgeIIoTSet format.  The Conv1D autoencoder runs
-inference and drives the animated network graph showing attack vs. normal
-traffic windows in real time.
+Upload one or more CSV files in EdgeIIoTSet format:
+- 1 file  → single device, treated as one traffic stream.
+- 2–5 files → one device per file; the animation shows all simultaneously.
 
 Inference pipeline
 ------------------
-1. Upload CSV  →  IoTPreprocessor.transform() (or fit_transform if no cache)
-2. create_windows(window_size=30)
+1. Upload CSV(s)  →  IoTPreprocessor.transform() (or fit_transform if no cache)
+2. create_windows(window_size=30) per device
 3. model.predict()  →  per-window median squared error
-4. threshold = 99th-percentile of reconstruction errors
+4. threshold = 99th-percentile of reconstruction errors (computed per device)
 5. anomaly = mse > threshold
-6. Build Plotly animation
+6. Interleave windows across devices → build Plotly animation
 """
 
 import pickle
@@ -29,6 +29,7 @@ _SIM_DIR = _PROJECT_ROOT / "src" / "simulation"
 _MODEL_PATH = _PROJECT_ROOT / "src" / "models" / "conv1d_autoencoder_final.keras"
 _PREPROCESSOR_PATH = Path(__file__).resolve().parent.parent / "preprocessor_cache.pkl"
 _WINDOW_SIZE = 30
+_MAX_DEVICES = 5
 
 sys.path.insert(0, str(_SIM_DIR))
 
@@ -49,7 +50,16 @@ _ATTACK_LABELS = {
     "Password_attack.csv":              "Password Attack",
 }
 
-_DEVICE_ICONS = ["📏", "🔥", "📡", "🔊", "🌡️", "🔐", "📷", "❄️", "⚡", "🔗"]
+_DEVICE_ICONS = ["📏", "🔥", "📡", "🔊", "🌡️"]
+
+
+def _device_name_from_file(filename: str, index: int) -> str:
+    """Derive a short device name from a CSV filename."""
+    label = _ATTACK_LABELS.get(filename)
+    if label:
+        return label.replace(" ", "_")
+    stem = Path(filename).stem.replace("_attack", "").replace("_", " ").title()
+    return stem if stem else f"Dispositivo_{index + 1}"
 
 
 @st.cache_resource(show_spinner="Cargando modelo Conv1D…")
@@ -61,7 +71,7 @@ def _load_model():
 
 @st.cache_resource(show_spinner="Cargando preprocesador…")
 def _load_cached_preprocessor():
-    """Load the global IoTPreprocessor from the pickle cache, or None if absent."""
+    """Return the cached IoTPreprocessor, or None if the cache file is absent."""
     if not _PREPROCESSOR_PATH.exists():
         return None
     with open(_PREPROCESSOR_PATH, "rb") as fh:
@@ -70,21 +80,20 @@ def _load_cached_preprocessor():
 
 
 def _run_inference(X_windows: np.ndarray, model) -> tuple[np.ndarray, float]:
-    """Run the autoencoder and return per-window reconstruction errors and threshold.
+    """Run the autoencoder and return per-window errors and threshold.
 
     Parameters
     ----------
     X_windows : np.ndarray
-        Windowed input of shape (n, window_size, features).
+        Shape (n, window_size, features).
     model : keras.Model
-        Loaded Conv1D autoencoder.
 
     Returns
     -------
     errors : np.ndarray
         Per-window median squared error.
     threshold : float
-        99th-percentile of errors used to classify anomalies.
+        99th-percentile of errors.
     """
     X_pred = model.predict(X_windows, batch_size=256, verbose=0)
     errors = np.median((X_windows - X_pred) ** 2, axis=(1, 2)).astype(float)
@@ -92,97 +101,169 @@ def _run_inference(X_windows: np.ndarray, model) -> tuple[np.ndarray, float]:
     return errors, threshold
 
 
-def _process_uploaded_file(uploaded_file, model) -> dict | None:
-    """Preprocess an uploaded CSV, run inference, and return result dict.
+def _preprocess_dataframes(
+    dfs: list[pd.DataFrame],
+) -> list[np.ndarray | None]:
+    """Preprocess a list of DataFrames using the cached preprocessor or fit_transform.
+
+    When the cache is available each DataFrame is transformed independently.
+    When there is no cache, all DataFrames are concatenated, fit_transform is
+    called once on the combined data, and the result is split back per device.
 
     Parameters
     ----------
-    uploaded_file : UploadedFile
-        Streamlit uploaded file object.
+    dfs : list of pd.DataFrame
+
+    Returns
+    -------
+    list of np.ndarray or None
+        One float32 array per input DataFrame; None on per-device error.
+    """
+    from preprocessor import IoTPreprocessor
+
+    preprocessor = _load_cached_preprocessor()
+
+    if preprocessor is not None:
+        results: list[np.ndarray | None] = []
+        for df in dfs:
+            try:
+                X, _ = preprocessor.transform(df)
+                results.append(X.values.astype("float32"))
+            except Exception:
+                results.append(None)
+        return results
+
+    combined = pd.concat(dfs, ignore_index=True)
+    pre = IoTPreprocessor(known_categories=None)
+    X_combined, _ = pre.fit_transform(combined)
+    X_arr = X_combined.values.astype("float32")
+
+    results = []
+    cursor = 0
+    for df in dfs:
+        n = len(df)
+        results.append(X_arr[cursor: cursor + n])
+        cursor += n
+    return results
+
+
+def _process_uploads(uploaded_files: list, model) -> dict | None:
+    """Read, preprocess, and run inference on one or more uploaded files.
+
+    Parameters
+    ----------
+    uploaded_files : list of UploadedFile
+        1–5 Streamlit uploaded file objects.
     model : keras.Model
-        Loaded Conv1D autoencoder.
 
     Returns
     -------
     dict or None
-        Result dict on success, None on failure (errors displayed via st.error).
+        Combined result dict on success, None on failure.
     """
     from windowing import create_windows
-    from preprocessor import IoTPreprocessor
+
+    dfs: list[pd.DataFrame] = []
+    file_meta: list[dict] = []
+
+    for idx, uf in enumerate(uploaded_files):
+        try:
+            df = pd.read_csv(uf, low_memory=False)
+        except Exception as exc:
+            st.error(f"No se pudo leer '{uf.name}': {exc}")
+            return None
+        if len(df) < _WINDOW_SIZE + 1:
+            st.error(
+                f"'{uf.name}' tiene solo {len(df)} filas — "
+                f"se necesitan al menos {_WINDOW_SIZE + 1}."
+            )
+            return None
+        dfs.append(df)
+        file_meta.append({"name": uf.name, "index": idx})
 
     try:
-        df = pd.read_csv(uploaded_file, low_memory=False)
-    except Exception as exc:
-        st.error(f"No se pudo leer el CSV: {exc}")
-        return None
-
-    if len(df) < _WINDOW_SIZE + 1:
-        st.error(
-            f"El archivo tiene solo {len(df)} filas. "
-            f"Se necesitan al menos {_WINDOW_SIZE + 1}."
-        )
-        return None
-
-    preprocessor = _load_cached_preprocessor()
-    try:
-        if preprocessor is not None:
-            X, _ = preprocessor.transform(df)
-        else:
-            pre = IoTPreprocessor(known_categories=None)
-            X, _ = pre.fit_transform(df)
-        X_arr = X.values.astype("float32")
+        arrays = _preprocess_dataframes(dfs)
     except Exception as exc:
         st.error(f"Error en preprocesamiento: {exc}")
         return None
 
-    try:
-        X_windows = create_windows(X_arr, _WINDOW_SIZE)
-        if X_windows.shape[0] == 0:
-            st.error("No se pudieron crear ventanas con estos datos.")
-            return None
-        errors, threshold = _run_inference(X_windows, model)
-        anomaly = (errors > threshold).astype(int)
-    except Exception as exc:
-        st.error(f"Error en inferencia: {exc}")
+    devices_info: list[dict] = []
+    for meta, X_arr in zip(file_meta, arrays):
+        if X_arr is None:
+            st.warning(f"Se omitió '{meta['name']}' por error en preprocesamiento.")
+            continue
+        try:
+            X_windows = create_windows(X_arr, _WINDOW_SIZE)
+            if X_windows.shape[0] == 0:
+                st.warning(f"'{meta['name']}': no se pudieron crear ventanas.")
+                continue
+            errors, threshold = _run_inference(X_windows, model)
+            anomaly = (errors > threshold).astype(int)
+        except Exception as exc:
+            st.warning(f"'{meta['name']}': error en inferencia — {exc}")
+            continue
+
+        idx = meta["index"]
+        device_name = _device_name_from_file(meta["name"], idx)
+        icon = _DEVICE_ICONS[idx % len(_DEVICE_ICONS)]
+        attack_label = _ATTACK_LABELS.get(meta["name"], Path(meta["name"]).stem.replace("_", " "))
+
+        devices_info.append({
+            "name": device_name,
+            "icon": icon,
+            "filename": meta["name"],
+            "attack_label": attack_label,
+            "errors": errors,
+            "anomaly": anomaly,
+            "threshold": threshold,
+            "n_windows": len(errors),
+            "n_anomaly": int(anomaly.sum()),
+        })
+
+    if not devices_info:
+        st.error("Ningún archivo pudo procesarse correctamente.")
         return None
 
-    filename = getattr(uploaded_file, "name", "upload.csv")
-    attack_label = _ATTACK_LABELS.get(filename, filename.replace(".csv", "").replace("_", " "))
-    device_name = "Dispositivo_IoT"
+    max_windows = max(d["n_windows"] for d in devices_info)
+    all_windows: list[dict] = []
+    all_errors_list: list[float] = []
+    all_anomaly_list: list[int] = []
+    window_devs: list[str] = []
 
-    all_windows = [
-        {
-            "ventana": i + 1,
-            "mse": round(float(errors[i]), 8),
-            "clasificacion": "🔴 Ataque" if anomaly[i] == 1 else "🟢 Normal",
-        }
-        for i in range(len(errors))
-    ]
+    for idx in range(max_windows):
+        for dev in devices_info:
+            if idx < dev["n_windows"]:
+                all_windows.append({
+                    "dispositivo": dev["name"],
+                    "ataque": dev["attack_label"],
+                    "ventana": idx + 1,
+                    "mse": round(float(dev["errors"][idx]), 8),
+                    "clasificacion": "🔴 Ataque" if dev["anomaly"][idx] == 1 else "🟢 Normal",
+                })
+                all_errors_list.append(float(dev["errors"][idx]))
+                all_anomaly_list.append(int(dev["anomaly"][idx]))
+                window_devs.append(dev["name"])
 
     return {
-        "device_name": device_name,
-        "attack_label": attack_label,
-        "errors": errors,
-        "anomaly": anomaly,
-        "threshold": threshold,
-        "n_windows": len(errors),
-        "n_anomaly": int(anomaly.sum()),
+        "devices": devices_info,
         "all_windows": all_windows,
+        "all_errors": np.array(all_errors_list, dtype=float),
+        "all_anomaly": np.array(all_anomaly_list, dtype=int),
+        "window_devs": window_devs,
     }
 
 
-def _render_device_card(name: str, info: dict) -> None:
-    """Render an HTML status card for the analyzed IoT device.
+def _render_device_card(col, dev: dict) -> None:
+    """Render an HTML status card for one IoT device into a Streamlit column.
 
     Parameters
     ----------
-    name : str
-        Device name.
-    info : dict
-        Result dict from ``_process_uploaded_file``.
+    col : streamlit column
+    dev : dict
+        Device info dict from ``_process_uploads``.
     """
-    n_anomaly = info["n_anomaly"]
-    n_windows = info["n_windows"]
+    n_anomaly = dev["n_anomaly"]
+    n_windows = dev["n_windows"]
     pct = 100.0 * n_anomaly / n_windows if n_windows > 0 else 0.0
     border_color = "#e74c3c" if n_anomaly > 0 else "#2ecc71"
     glow = f"0 0 12px {border_color}55"
@@ -194,46 +275,46 @@ def _render_device_card(name: str, info: dict) -> None:
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
     border: 2px solid {border_color};
     border-radius: 12px;
-    padding: 16px 24px;
+    padding: 16px 12px;
     box-shadow: {glow};
     text-align: center;
-    max-width: 320px;
-    margin: 0 auto 16px auto;
+    margin-bottom: 8px;
 ">
-    <div style="font-size: 2.4rem; margin-bottom: 6px;">📡</div>
-    <div style="color: #ecf0f1; font-weight: 600; font-size: 0.9rem; margin-bottom: 8px;">
-        {name.replace('_', ' ')}
+    <div style="font-size: 2rem; margin-bottom: 6px;">{dev['icon']}</div>
+    <div style="color: #ecf0f1; font-weight: 600; font-size: 0.82rem;
+                margin-bottom: 8px; word-break: break-word;">
+        {dev['name'].replace('_', ' ')}
     </div>
     <div style="
         display: inline-block;
         background: {status_bg};
         color: white;
-        font-size: 0.7rem;
+        font-size: 0.62rem;
         font-weight: 700;
-        padding: 3px 10px;
+        padding: 2px 8px;
         border-radius: 20px;
         letter-spacing: 0.05em;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
     ">{status_text}</div>
-    <div style="color: #bdc3c7; font-size: 0.8rem; margin-bottom: 6px;">
-        {info['attack_label']}
+    <div style="color: #bdc3c7; font-size: 0.75rem; margin-bottom: 4px;">
+        {dev['attack_label']}
     </div>
-    <div style="color: #e74c3c; font-weight: 700; font-size: 1.3rem;">
+    <div style="color: #e74c3c; font-weight: 700; font-size: 1.1rem;">
         {n_anomaly}
-        <span style="color: #7f8c8d; font-weight: 400; font-size: 0.85rem;">
-            / {n_windows} ventanas
+        <span style="color: #7f8c8d; font-weight: 400; font-size: 0.8rem;">
+            / {n_windows}
         </span>
     </div>
-    <div style="color: #95a5a6; font-size: 0.75rem;">{pct:.1f}% anomalías</div>
+    <div style="color: #95a5a6; font-size: 0.72rem;">{pct:.1f}% anomalías</div>
 </div>
 """
-    st.markdown(html, unsafe_allow_html=True)
+    col.markdown(html, unsafe_allow_html=True)
 
 
 def _upload_prompt() -> None:
     """Render the landing screen shown when no file has been uploaded."""
     st.markdown(
-        """
+        f"""
 <div style="
     text-align: center;
     padding: 60px 20px;
@@ -243,19 +324,30 @@ def _upload_prompt() -> None:
     margin: 20px 0;
 ">
     <div style="font-size: 4rem; margin-bottom: 16px;">🔒</div>
-    <h2 style="color: #ecf0f1; margin-bottom: 8px;">Sube un CSV de tráfico de red</h2>
-    <p style="color: #95a5a6; font-size: 0.95rem; max-width: 480px; margin: 0 auto;">
-        Usa el panel lateral para cargar un archivo <b style="color:#ecf0f1;">CSV del dataset EdgeIIoTSet</b>.
-        El modelo Conv1D federado clasificará cada ventana de tráfico en
-        <span style="color:#2ecc71;">Normal</span> o
-        <span style="color:#e74c3c;">Ataque</span>
-        y animará el flujo en tiempo real.
+    <h2 style="color: #ecf0f1; margin-bottom: 8px;">Sube tus archivos de tráfico</h2>
+    <p style="color: #95a5a6; font-size: 0.95rem; max-width: 520px; margin: 0 auto 16px auto;">
+        Usa el panel lateral para cargar uno o varios CSV del dataset
+        <b style="color:#ecf0f1;">EdgeIIoTSet</b>.
+        El modelo Conv1D federado clasificará cada ventana y animará el flujo.
     </p>
-    <div style="margin-top: 24px; color: #7f8c8d; font-size: 0.8rem;">
-        Mínimo {min_rows} filas · Formato EdgeIIoTSet · 78 features
+    <div style="display: flex; justify-content: center; gap: 32px; margin-top: 20px; flex-wrap: wrap;">
+        <div style="text-align:center;">
+            <div style="font-size:1.8rem;">📄</div>
+            <div style="color:#ecf0f1; font-weight:600; font-size:0.85rem;">1 archivo</div>
+            <div style="color:#95a5a6; font-size:0.75rem;">Un dispositivo IoT</div>
+        </div>
+        <div style="color:#7f8c8d; font-size:1.5rem; align-self:center;">→</div>
+        <div style="text-align:center;">
+            <div style="font-size:1.8rem;">📄📄📄</div>
+            <div style="color:#ecf0f1; font-weight:600; font-size:0.85rem;">2–{_MAX_DEVICES} archivos</div>
+            <div style="color:#95a5a6; font-size:0.75rem;">Varios dispositivos simultáneos</div>
+        </div>
+    </div>
+    <div style="margin-top: 24px; color: #7f8c8d; font-size: 0.78rem;">
+        Mínimo {_WINDOW_SIZE + 1} filas por archivo · Formato EdgeIIoTSet · 78 features
     </div>
 </div>
-""".replace("{min_rows}", str(_WINDOW_SIZE + 1)),
+""",
         unsafe_allow_html=True,
     )
 
@@ -285,17 +377,27 @@ def main() -> None:
 
         st.markdown("### 📂 Cargar datos")
         st.caption(
-            f"Sube un CSV en formato EdgeIIoTSet "
-            f"(mín. {_WINDOW_SIZE + 1} filas)."
+            f"Sube **1 archivo** (un dispositivo) o hasta **{_MAX_DEVICES} archivos** "
+            f"(un dispositivo por CSV)."
         )
-        uploaded = st.file_uploader(
-            label="Selecciona un CSV de tráfico de red",
+
+        uploaded_files = st.file_uploader(
+            label="Selecciona CSV(s) de tráfico de red",
             type=["csv"],
+            accept_multiple_files=True,
             label_visibility="collapsed",
         )
 
-        if uploaded is not None:
-            if st.button("🔄 Limpiar y cargar otro", use_container_width=True):
+        if uploaded_files:
+            if len(uploaded_files) > _MAX_DEVICES:
+                st.warning(f"Máximo {_MAX_DEVICES} archivos — se usarán los primeros {_MAX_DEVICES}.")
+                uploaded_files = uploaded_files[:_MAX_DEVICES]
+            st.caption(f"{len(uploaded_files)} archivo(s) cargado(s):")
+            for uf in uploaded_files:
+                label = _ATTACK_LABELS.get(uf.name, uf.name)
+                st.caption(f"  • {label}")
+
+            if st.button("🔄 Limpiar y cargar otros", use_container_width=True):
                 for key in list(st.session_state.keys()):
                     if key.startswith("result_"):
                         del st.session_state[key]
@@ -307,48 +409,62 @@ def main() -> None:
         "EdgeIIoTSet dataset · 14 tipos de ataque"
     )
 
-    if uploaded is None:
+    if not uploaded_files:
         _upload_prompt()
         return
 
-    cache_key = f"result_{uploaded.name}_{uploaded.size}"
+    cache_key = "result_" + "_".join(f"{uf.name}_{uf.size}" for uf in uploaded_files)
     if cache_key not in st.session_state:
-        with st.spinner("⚙️ Ejecutando inferencia…"):
-            st.session_state[cache_key] = _process_uploaded_file(uploaded, model)
+        with st.spinner(f"⚙️ Procesando {len(uploaded_files)} archivo(s)…"):
+            st.session_state[cache_key] = _process_uploads(uploaded_files, model)
 
     data = st.session_state[cache_key]
 
     if data is None:
         return
 
+    devices_info   = data["devices"]
+    all_errors     = data["all_errors"]
+    all_anomaly    = data["all_anomaly"]
+    window_devs    = data["window_devs"]
+    all_windows    = data["all_windows"]
+
+    total_attacks       = int(all_anomaly.sum())
+    devs_under_attack   = sum(1 for d in devices_info if d["n_anomaly"] > 0)
+
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("Archivo",               uploaded.name)
-    col_m2.metric("Ventanas analizadas",   data["n_windows"])
-    col_m3.metric("Ataques detectados",    data["n_anomaly"])
-    col_m4.metric("Umbral MSE",            f"{data['threshold']:.6f}")
+    col_m1.metric("Dispositivos",              len(devices_info))
+    col_m2.metric("Ventanas analizadas",       len(all_anomaly))
+    col_m3.metric("Ataques detectados",        total_attacks)
+    col_m4.metric("Dispositivos bajo ataque",  devs_under_attack)
 
     st.markdown("---")
 
     from attack_animation import build_attack_animation
 
+    device_attack_types = {d["name"]: d["attack_label"] for d in devices_info}
+
     st.plotly_chart(
         build_attack_animation(
-            device_names=[data["device_name"]],
-            anomaly=data["anomaly"],
-            errors=data["errors"],
+            device_names=[d["name"] for d in devices_info],
+            anomaly=all_anomaly,
+            errors=all_errors,
+            window_devs=window_devs,
+            device_attack_types=device_attack_types,
         ),
         use_container_width=True,
     )
 
-    st.markdown("#### Estado del Dispositivo")
-    _, card_col, _ = st.columns([1, 2, 1])
-    with card_col:
-        _render_device_card(data["device_name"], data)
+    st.markdown("#### Estado de Dispositivos")
+    n_cols = min(len(devices_info), _MAX_DEVICES)
+    card_cols = st.columns(n_cols)
+    for idx, dev in enumerate(devices_info):
+        _render_device_card(card_cols[idx % n_cols], dev)
 
     st.markdown("---")
     st.markdown("#### Registro de Clasificación")
     st.dataframe(
-        pd.DataFrame(data["all_windows"]),
+        pd.DataFrame(all_windows),
         use_container_width=True,
         hide_index=True,
     )

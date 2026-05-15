@@ -649,7 +649,7 @@ def _render_device_card(col, dev: dict) -> None:
 def _upload_prompt() -> None:
     """Render the landing screen shown when no file has been uploaded."""
     st.markdown(
-        f"""
+        """
 <div style="
     text-align: center;
     padding: 60px 20px;
@@ -658,33 +658,7 @@ def _upload_prompt() -> None:
     border: 1px solid #2c3e50;
     margin: 20px 0;
 ">
-    <h2 style="color: #ecf0f1; margin-bottom: 8px;">Sube tus archivos de trafico</h2>
-    <p style="color: #95a5a6; font-size: 0.95rem; max-width: 560px; margin: 0 auto 16px auto;">
-        Usa el panel lateral para cargar uno o varios CSV del dataset
-        <b style="color:#ecf0f1;">EdgeIIoTSet</b>.
-        Para ver clasificaciones mixtas (normal + ataque), sube archivos de
-        <b style="color:#3498db;">test o combinados</b>.
-        Con archivos de ataque puro, todas las ventanas resultaran anomalias.
-    </p>
-    <div style="display: flex; justify-content: center; gap: 32px; margin-top: 20px; flex-wrap: wrap;">
-        <div style="text-align:center;">
-            <div style="color:#3498db; font-weight:600; font-size:0.85rem;">Recomendado</div>
-            <div style="color:#95a5a6; font-size:0.75rem;">CSV de test / trafico mixto</div>
-        </div>
-        <div style="color:#7f8c8d; font-size:1.5rem; align-self:center;">·</div>
-        <div style="text-align:center;">
-            <div style="color:#ecf0f1; font-weight:600; font-size:0.85rem;">Tambien valido</div>
-            <div style="color:#95a5a6; font-size:0.75rem;">CSV de ataque puro (100% anomalias)</div>
-        </div>
-        <div style="color:#7f8c8d; font-size:1.5rem; align-self:center;">·</div>
-        <div style="text-align:center;">
-            <div style="color:#ecf0f1; font-weight:600; font-size:0.85rem;">hasta {_MAX_DEVICES} archivos</div>
-            <div style="color:#95a5a6; font-size:0.75rem;">Varios dispositivos simultaneos</div>
-        </div>
-    </div>
-    <div style="margin-top: 24px; color: #7f8c8d; font-size: 0.78rem;">
-        Mínimo {_WINDOW_SIZE + 1} filas · Máx. 1 GB por archivo · Formato EdgeIIoTSet
-    </div>
+    <h2 style="color: #ecf0f1; margin-bottom: 8px;">Carga un archivo CSV en el panel lateral</h2>
 </div>
 """,
         unsafe_allow_html=True,
@@ -725,11 +699,9 @@ def main() -> None:
         st.divider()
 
         st.markdown("### Modelo")
-        st.success("Conv1D Autoencoder — FL")
         st.metric("AUROC",    "0.9999")
         st.metric("Recall",   "99.95 %")
         st.metric("F1 (bal)", "0.9986")
-        st.caption("Entrenado con Federated Learning sobre 8 dispositivos IoT.")
 
         st.divider()
 
@@ -740,15 +712,10 @@ def main() -> None:
             value=10,
             label_visibility="collapsed",
         )
-        st.caption(f"**{speed_wps} ventanas/seg** — la simulacion muestra cada clasificacion en tiempo real.")
 
         st.divider()
 
         st.markdown("### Cargar datos")
-        st.caption(
-            f"Sube **1-{_MAX_DEVICES} archivos** CSV (un dispositivo por archivo, max. 1 GB c/u). "
-            "Para ver trafico mixto, usa archivos de **test** o combinados del dataset."
-        )
 
         uploaded_files = st.file_uploader(
             label="Selecciona CSV(s) de trafico de red",
@@ -773,10 +740,6 @@ def main() -> None:
                 st.rerun()
 
     st.title("IoT Network Attack Monitor")
-    st.caption(
-        "Deteccion de anomalias IoT con Conv1D autoencoder federado — "
-        "EdgeIIoTSet dataset · 14 tipos de ataque"
-    )
 
     if not uploaded_files:
         _upload_prompt()
@@ -804,26 +767,12 @@ def main() -> None:
     col_m3.metric("Ataques detectados",       f"{total_attacks:,}")
     col_m4.metric("Dispositivos bajo ataque", devs_under_attack)
 
-    if threshold_cache is not None:
-        global_thr = threshold_cache.get("threshold", "-")
-        st.success(
-            f"**Umbral del modelo cargado** (global: `{global_thr}`, "
-            "por dispositivo: 0.0006-0.0008) — leido directamente de los resultados de entrenamiento FL. "
-            "Clasificaciones absolutas, no relativas a los datos subidos."
-        )
-    else:
-        st.warning(
-            "**Umbral relativo** — `threshold_cache.pkl` no encontrado. "
-            "Siempre se marca el 1% con mayor MSE independientemente del contenido."
-        )
-
     st.markdown("---")
 
     sim_done_key = cache_key + "_sim_done"
     sim_started_key = cache_key + "_sim_started"
 
     if sim_done_key not in st.session_state and sim_started_key not in st.session_state:
-        st.info("Archivos procesados. Presiona 'Iniciar simulacion' para comenzar.")
         if st.button("Iniciar simulacion", type="primary", use_container_width=False):
             st.session_state[sim_started_key] = True
             st.rerun()

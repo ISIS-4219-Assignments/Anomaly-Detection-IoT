@@ -649,7 +649,7 @@ def _render_device_card(col, dev: dict) -> None:
 def _upload_prompt() -> None:
     """Render the landing screen shown when no file has been uploaded."""
     st.markdown(
-        """
+        f"""
 <div style="
     text-align: center;
     padding: 60px 20px;
@@ -658,7 +658,21 @@ def _upload_prompt() -> None:
     border: 1px solid #2c3e50;
     margin: 20px 0;
 ">
-    <h2 style="color: #ecf0f1; margin-bottom: 8px;">Carga un archivo CSV en el panel lateral</h2>
+    <h2 style="color: #ecf0f1; margin-bottom: 24px;">Carga un archivo CSV en el panel lateral</h2>
+    <div style="display: flex; justify-content: center; gap: 48px; flex-wrap: wrap;">
+        <div style="text-align:center;">
+            <div style="color:#ecf0f1; font-weight:600; font-size:0.9rem;">Tipo de archivo</div>
+            <div style="color:#95a5a6; font-size:0.8rem; margin-top:4px;">test.csv (trafico mixto)</div>
+        </div>
+        <div style="text-align:center;">
+            <div style="color:#ecf0f1; font-weight:600; font-size:0.9rem;">Cantidad</div>
+            <div style="color:#95a5a6; font-size:0.8rem; margin-top:4px;">1 a {_MAX_DEVICES} archivos</div>
+        </div>
+        <div style="text-align:center;">
+            <div style="color:#ecf0f1; font-weight:600; font-size:0.9rem;">Tamano maximo</div>
+            <div style="color:#95a5a6; font-size:0.8rem; margin-top:4px;">1 GB por archivo</div>
+        </div>
+    </div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -716,6 +730,7 @@ def main() -> None:
         st.divider()
 
         st.markdown("### Cargar datos")
+        st.caption(f"1 a {_MAX_DEVICES} archivos · test.csv recomendado · max. 1 GB c/u")
 
         uploaded_files = st.file_uploader(
             label="Selecciona CSV(s) de trafico de red",

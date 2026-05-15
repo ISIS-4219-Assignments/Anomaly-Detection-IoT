@@ -31,6 +31,9 @@ _PREPROCESSOR_PATH = Path(__file__).resolve().parent.parent / "preprocessor_cach
 _WINDOW_SIZE = 30
 _MAX_DEVICES = 14
 _MAX_FILE_BYTES = 1 * 1024 * 1024 * 1024
+_MAX_ANIMATION_WINDOWS = 300
+_CHUNK_SIZE = 5_000
+_LARGE_FILE_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 
 sys.path.insert(0, str(_SIM_DIR))
 
@@ -110,6 +113,77 @@ def _run_inference(X_windows: np.ndarray, model) -> tuple[np.ndarray, float]:
     return errors, threshold
 
 
+def _stream_inference(uploaded_file, preprocessor, model, file_size: int) -> tuple[np.ndarray, float] | None:
+    """Process a large CSV in chunks to keep memory usage constant.
+
+    Reads ``_CHUNK_SIZE`` rows at a time, transforms each chunk with the
+    cached preprocessor, creates windows with a carry-over buffer so windows
+    never straddle missing rows, and runs inference incrementally.  All
+    per-window errors are collected in a flat list; the global threshold is
+    computed once at the end from the full distribution.
+
+    Parameters
+    ----------
+    uploaded_file : UploadedFile
+    preprocessor : IoTPreprocessor
+    model : keras.Model
+    file_size : int
+        Original file size in bytes, used for progress estimation.
+
+    Returns
+    -------
+    (errors, threshold) or None on failure.
+    """
+    from windowing import create_windows
+
+    all_errors: list[float] = []
+    carry: np.ndarray | None = None
+    estimated_chunks = max(file_size // (_CHUNK_SIZE * 200), 1)
+    chunks_done = 0
+
+    bar = st.progress(0, text="Procesando archivo completo…")
+
+    try:
+        for chunk in pd.read_csv(uploaded_file, chunksize=_CHUNK_SIZE, low_memory=False):
+            try:
+                X_chunk, _ = preprocessor.transform(chunk)
+                X_arr = X_chunk.values.astype("float32")
+            except Exception:
+                carry = None
+                continue
+
+            if carry is not None and carry.shape[1] == X_arr.shape[1]:
+                X_arr = np.vstack([carry, X_arr])
+
+            X_windows = create_windows(X_arr, _WINDOW_SIZE)
+            carry = X_arr[-(_WINDOW_SIZE - 1):]
+
+            if X_windows.shape[0] == 0:
+                continue
+
+            X_pred = model.predict(X_windows, batch_size=512, verbose=0)
+            errors = np.median((X_windows - X_pred) ** 2, axis=(1, 2)).astype(float)
+            all_errors.extend(errors.tolist())
+
+            chunks_done += 1
+            progress = min(chunks_done / estimated_chunks, 0.99)
+            bar.progress(progress, text=f"Ventanas procesadas: {len(all_errors):,}")
+
+    except Exception as exc:
+        bar.empty()
+        st.error(f"Error durante el procesamiento: {exc}")
+        return None
+
+    bar.empty()
+
+    if not all_errors:
+        return None
+
+    errors_arr = np.array(all_errors, dtype=float)
+    threshold = float(np.percentile(errors_arr, 99))
+    return errors_arr, threshold
+
+
 def _preprocess_dataframes(
     dfs: list[pd.DataFrame],
 ) -> list[np.ndarray | None]:
@@ -159,10 +233,17 @@ def _preprocess_dataframes(
 def _process_uploads(uploaded_files: list, model) -> dict | None:
     """Read, preprocess, and run inference on one or more uploaded files.
 
+    Large files (> _LARGE_FILE_THRESHOLD) are processed in chunks when the
+    preprocessor cache is available, keeping RAM usage constant regardless of
+    file size.  Small files follow the standard in-memory path.
+
+    The animation always shows at most _MAX_ANIMATION_WINDOWS windows (evenly
+    sampled from the full results); statistics (n_windows, n_anomaly) reflect
+    the complete file.
+
     Parameters
     ----------
     uploaded_files : list of UploadedFile
-        1–5 Streamlit uploaded file objects.
     model : keras.Model
 
     Returns
@@ -172,96 +253,134 @@ def _process_uploads(uploaded_files: list, model) -> dict | None:
     """
     from windowing import create_windows
 
-    dfs: list[pd.DataFrame] = []
-    file_meta: list[dict] = []
+    preprocessor = _load_cached_preprocessor()
+    devices_info: list[dict] = []
+    small_dfs: list[pd.DataFrame] = []
+    small_meta: list[dict] = []
 
     for idx, uf in enumerate(uploaded_files):
         if uf.size > _MAX_FILE_BYTES:
             st.error(f"'{uf.name}' supera el límite de 1 GB ({uf.size / 1e9:.2f} GB).")
             return None
-        try:
-            df = pd.read_csv(uf, low_memory=False)
-        except Exception as exc:
-            st.error(f"No se pudo leer '{uf.name}': {exc}")
-            return None
-        if len(df) < _WINDOW_SIZE + 1:
-            st.error(
-                f"'{uf.name}' tiene solo {len(df)} filas — "
-                f"se necesitan al menos {_WINDOW_SIZE + 1}."
-            )
-            return None
-        dfs.append(df)
-        file_meta.append({"name": uf.name, "index": idx})
 
-    try:
-        arrays = _preprocess_dataframes(dfs)
-    except Exception as exc:
-        st.error(f"Error en preprocesamiento: {exc}")
-        return None
+        is_large = uf.size >= _LARGE_FILE_THRESHOLD and preprocessor is not None
 
-    devices_info: list[dict] = []
-    for meta, X_arr in zip(file_meta, arrays):
-        if X_arr is None:
-            st.warning(f"Se omitió '{meta['name']}' por error en preprocesamiento.")
-            continue
-        try:
-            X_windows = create_windows(X_arr, _WINDOW_SIZE)
-            if X_windows.shape[0] == 0:
-                st.warning(f"'{meta['name']}': no se pudieron crear ventanas.")
-                continue
-            errors, threshold = _run_inference(X_windows, model)
+        if is_large:
+            st.caption(f"📦 '{uf.name}' ({uf.size / 1e6:.0f} MB) — procesando en chunks…")
+            result = _stream_inference(uf, preprocessor, model, uf.size)
+            if result is None:
+                return None
+            errors, threshold = result
             anomaly = (errors > threshold).astype(int)
+
+            device_name = _device_name_from_file(uf.name, idx)
+            devices_info.append({
+                "name": device_name,
+                "icon": _DEVICE_ICONS[idx % len(_DEVICE_ICONS)],
+                "filename": uf.name,
+                "attack_label": _ATTACK_LABELS.get(uf.name, Path(uf.name).stem.replace("_", " ")),
+                "errors": errors,
+                "anomaly": anomaly,
+                "threshold": threshold,
+                "n_windows": len(errors),
+                "n_anomaly": int(anomaly.sum()),
+            })
+        else:
+            try:
+                df = pd.read_csv(uf, low_memory=False)
+            except Exception as exc:
+                st.error(f"No se pudo leer '{uf.name}': {exc}")
+                return None
+            if len(df) < _WINDOW_SIZE + 1:
+                st.error(
+                    f"'{uf.name}' tiene solo {len(df)} filas — "
+                    f"se necesitan al menos {_WINDOW_SIZE + 1}."
+                )
+                return None
+            small_dfs.append(df)
+            small_meta.append({"name": uf.name, "index": idx})
+
+    if small_dfs:
+        try:
+            arrays = _preprocess_dataframes(small_dfs)
         except Exception as exc:
-            st.warning(f"'{meta['name']}': error en inferencia — {exc}")
-            continue
+            st.error(f"Error en preprocesamiento: {exc}")
+            return None
 
-        idx = meta["index"]
-        device_name = _device_name_from_file(meta["name"], idx)
-        icon = _DEVICE_ICONS[idx % len(_DEVICE_ICONS)]
-        attack_label = _ATTACK_LABELS.get(meta["name"], Path(meta["name"]).stem.replace("_", " "))
+        for meta, X_arr in zip(small_meta, arrays):
+            if X_arr is None:
+                st.warning(f"Se omitió '{meta['name']}' por error en preprocesamiento.")
+                continue
+            try:
+                X_windows = create_windows(X_arr, _WINDOW_SIZE)
+                if X_windows.shape[0] == 0:
+                    st.warning(f"'{meta['name']}': no se pudieron crear ventanas.")
+                    continue
+                errors, threshold = _run_inference(X_windows, model)
+                anomaly = (errors > threshold).astype(int)
+            except Exception as exc:
+                st.warning(f"'{meta['name']}': error en inferencia — {exc}")
+                continue
 
-        devices_info.append({
-            "name": device_name,
-            "icon": icon,
-            "filename": meta["name"],
-            "attack_label": attack_label,
-            "errors": errors,
-            "anomaly": anomaly,
-            "threshold": threshold,
-            "n_windows": len(errors),
-            "n_anomaly": int(anomaly.sum()),
-        })
+            idx = meta["index"]
+            devices_info.append({
+                "name": _device_name_from_file(meta["name"], idx),
+                "icon": _DEVICE_ICONS[idx % len(_DEVICE_ICONS)],
+                "filename": meta["name"],
+                "attack_label": _ATTACK_LABELS.get(meta["name"], Path(meta["name"]).stem.replace("_", " ")),
+                "errors": errors,
+                "anomaly": anomaly,
+                "threshold": threshold,
+                "n_windows": len(errors),
+                "n_anomaly": int(anomaly.sum()),
+            })
 
     if not devices_info:
         st.error("Ningún archivo pudo procesarse correctamente.")
         return None
 
     max_windows = max(d["n_windows"] for d in devices_info)
-    all_windows: list[dict] = []
+    all_windows_full: list[dict] = []
     all_errors_list: list[float] = []
     all_anomaly_list: list[int] = []
-    window_devs: list[str] = []
+    window_devs_full: list[str] = []
 
-    for idx in range(max_windows):
+    for win_idx in range(max_windows):
         for dev in devices_info:
-            if idx < dev["n_windows"]:
-                all_windows.append({
+            if win_idx < dev["n_windows"]:
+                all_windows_full.append({
                     "dispositivo": dev["name"],
                     "ataque": dev["attack_label"],
-                    "ventana": idx + 1,
-                    "mse": round(float(dev["errors"][idx]), 8),
-                    "clasificacion": "🔴 Ataque" if dev["anomaly"][idx] == 1 else "🟢 Normal",
+                    "ventana": win_idx + 1,
+                    "mse": round(float(dev["errors"][win_idx]), 8),
+                    "clasificacion": "🔴 Ataque" if dev["anomaly"][win_idx] == 1 else "🟢 Normal",
                 })
-                all_errors_list.append(float(dev["errors"][idx]))
-                all_anomaly_list.append(int(dev["anomaly"][idx]))
-                window_devs.append(dev["name"])
+                all_errors_list.append(float(dev["errors"][win_idx]))
+                all_anomaly_list.append(int(dev["anomaly"][win_idx]))
+                window_devs_full.append(dev["name"])
+
+    all_errors_arr = np.array(all_errors_list, dtype=float)
+    all_anomaly_arr = np.array(all_anomaly_list, dtype=int)
+
+    total = len(all_anomaly_arr)
+    if total > _MAX_ANIMATION_WINDOWS:
+        indices = np.linspace(0, total - 1, _MAX_ANIMATION_WINDOWS, dtype=int)
+        anim_errors  = all_errors_arr[indices]
+        anim_anomaly = all_anomaly_arr[indices]
+        anim_devs    = [window_devs_full[i] for i in indices]
+    else:
+        anim_errors  = all_errors_arr
+        anim_anomaly = all_anomaly_arr
+        anim_devs    = window_devs_full
 
     return {
-        "devices": devices_info,
-        "all_windows": all_windows,
-        "all_errors": np.array(all_errors_list, dtype=float),
-        "all_anomaly": np.array(all_anomaly_list, dtype=int),
-        "window_devs": window_devs,
+        "devices":     devices_info,
+        "all_windows": all_windows_full,
+        "all_errors":  anim_errors,
+        "all_anomaly": anim_anomaly,
+        "window_devs": anim_devs,
+        "total_windows": total,
+        "total_anomaly": int(all_anomaly_arr.sum()),
     }
 
 
@@ -440,13 +559,14 @@ def main() -> None:
     window_devs    = data["window_devs"]
     all_windows    = data["all_windows"]
 
-    total_attacks       = int(all_anomaly.sum())
+    total_attacks       = data["total_anomaly"]
+    total_windows       = data["total_windows"]
     devs_under_attack   = sum(1 for d in devices_info if d["n_anomaly"] > 0)
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     col_m1.metric("Dispositivos",              len(devices_info))
-    col_m2.metric("Ventanas analizadas",       len(all_anomaly))
-    col_m3.metric("Ataques detectados",        total_attacks)
+    col_m2.metric("Ventanas analizadas",       f"{total_windows:,}")
+    col_m3.metric("Ataques detectados",        f"{total_attacks:,}")
     col_m4.metric("Dispositivos bajo ataque",  devs_under_attack)
 
     st.markdown("---")

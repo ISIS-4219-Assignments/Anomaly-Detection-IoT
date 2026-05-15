@@ -199,7 +199,7 @@ def build_attack_animation(
     device_names = list(device_names)
     dev_pos = dict(zip(device_names, _circle(len(device_names))))
 
-    n_win = min(int(len(anomaly)), 100)
+    n_win = min(int(len(anomaly)), 300)
     anomaly = np.asarray(anomaly[:n_win], dtype=int)
     errors = np.asarray(errors[:n_win], dtype=float)
     max_err = float(np.max(errors)) if errors.size > 0 else 1.0

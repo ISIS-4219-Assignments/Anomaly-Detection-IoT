@@ -29,9 +29,22 @@ _SIM_DIR = _PROJECT_ROOT / "src" / "simulation"
 _MODEL_PATH = _PROJECT_ROOT / "src" / "models" / "conv1d_autoencoder_final.keras"
 _PREPROCESSOR_PATH = Path(__file__).resolve().parent.parent / "preprocessor_cache.pkl"
 _WINDOW_SIZE = 30
-_MAX_DEVICES = 5
+_MAX_DEVICES = 14
+_MAX_FILE_BYTES = 1 * 1024 * 1024 * 1024
 
 sys.path.insert(0, str(_SIM_DIR))
+
+_DEVICE_NAMES = [
+    "Termostato",    "Camara_IP",    "Sensor_Temp",  "Medidor_Luz",
+    "Cerradura",     "Router_IoT",   "Sensor_Gas",   "Monitor_CO2",
+    "Control_HVAC",  "Interruptor",  "Sensor_Mov",   "Gateway",
+    "Broker_MQTT",   "Panel_Solar",
+]
+
+_DEVICE_ICONS = [
+    "🌡️", "📷", "📡", "💡", "🔐", "📶", "💨", "🌿",
+    "❄️", "🔌", "👁️", "🔗", "📨", "☀️",
+]
 
 _ATTACK_LABELS = {
     "DDoS_UDP_Flood_attack.csv":        "DDoS UDP Flood",
@@ -54,12 +67,8 @@ _DEVICE_ICONS = ["📏", "🔥", "📡", "🔊", "🌡️"]
 
 
 def _device_name_from_file(filename: str, index: int) -> str:
-    """Derive a short device name from a CSV filename."""
-    label = _ATTACK_LABELS.get(filename)
-    if label:
-        return label.replace(" ", "_")
-    stem = Path(filename).stem.replace("_attack", "").replace("_", " ").title()
-    return stem if stem else f"Dispositivo_{index + 1}"
+    """Return a generic IoT device name based on upload order."""
+    return _DEVICE_NAMES[index % len(_DEVICE_NAMES)]
 
 
 @st.cache_resource(show_spinner="Cargando modelo Conv1D…")
@@ -167,6 +176,9 @@ def _process_uploads(uploaded_files: list, model) -> dict | None:
     file_meta: list[dict] = []
 
     for idx, uf in enumerate(uploaded_files):
+        if uf.size > _MAX_FILE_BYTES:
+            st.error(f"'{uf.name}' supera el límite de 1 GB ({uf.size / 1e9:.2f} GB).")
+            return None
         try:
             df = pd.read_csv(uf, low_memory=False)
         except Exception as exc:
@@ -339,12 +351,12 @@ def _upload_prompt() -> None:
         <div style="color:#7f8c8d; font-size:1.5rem; align-self:center;">→</div>
         <div style="text-align:center;">
             <div style="font-size:1.8rem;">📄📄📄</div>
-            <div style="color:#ecf0f1; font-weight:600; font-size:0.85rem;">2–{_MAX_DEVICES} archivos</div>
+            <div style="color:#ecf0f1; font-weight:600; font-size:0.85rem;">hasta {_MAX_DEVICES} archivos</div>
             <div style="color:#95a5a6; font-size:0.75rem;">Varios dispositivos simultáneos</div>
         </div>
     </div>
     <div style="margin-top: 24px; color: #7f8c8d; font-size: 0.78rem;">
-        Mínimo {_WINDOW_SIZE + 1} filas por archivo · Formato EdgeIIoTSet · 78 features
+        Mínimo {_WINDOW_SIZE + 1} filas · Máx. 1 GB por archivo · Formato EdgeIIoTSet
     </div>
 </div>
 """,
@@ -377,8 +389,7 @@ def main() -> None:
 
         st.markdown("### 📂 Cargar datos")
         st.caption(
-            f"Sube **1 archivo** (un dispositivo) o hasta **{_MAX_DEVICES} archivos** "
-            f"(un dispositivo por CSV)."
+            f"Sube **1–{_MAX_DEVICES} archivos** CSV (un dispositivo por archivo, máx. 1 GB c/u)."
         )
 
         uploaded_files = st.file_uploader(
@@ -390,7 +401,7 @@ def main() -> None:
 
         if uploaded_files:
             if len(uploaded_files) > _MAX_DEVICES:
-                st.warning(f"Máximo {_MAX_DEVICES} archivos — se usarán los primeros {_MAX_DEVICES}.")
+                st.warning(f"Máximo {_MAX_DEVICES} archivos a la vez — se usarán los primeros {_MAX_DEVICES}.")
                 uploaded_files = uploaded_files[:_MAX_DEVICES]
             st.caption(f"{len(uploaded_files)} archivo(s) cargado(s):")
             for uf in uploaded_files:

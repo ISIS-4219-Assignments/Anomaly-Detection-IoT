@@ -1,19 +1,18 @@
 """attack_animation.py
 
-Plotly-based animated network attack visualization.
+Plotly-based animated network visualization for the FL IoT Anomaly Detection
+system.
 
-Renders 4-5 IoT device nodes on a circle around a central Internet/attacker
-node.  Inference results drive a stream of coloured packets that travel from
-the attacker toward the devices:
+Topology: IoT device nodes sit on a circle around a central Server node.
+Each device receives traffic (normal or attack) and forwards it to the server.
+Packets travel FROM each device TOWARD the central server.
 
   Red    — anomaly window (reconstruction error > threshold)
   Green  — normal window
 
-Device nodes accumulate colour from green to red as attack packets arrive,
-giving an immediate visual sense of which devices are under the most pressure.
-
-The figure is returned as a self-contained Plotly Figure with Play / Pause
-controls so it runs client-side inside Streamlit without any polling loop.
+Device nodes accumulate colour from green to red as attack packets are sent,
+showing which devices are forwarding the most malicious traffic.  The server
+node pulses red when it is actively receiving an attack packet.
 """
 
 import math
@@ -30,6 +29,8 @@ _COLOR_ANOMALY = "#e74c3c"
 _COLOR_IDLE = "#2c3e50"
 _COLOR_DEVICE_SAFE = "#2ecc71"
 _COLOR_DEVICE_HOT = "#e74c3c"
+_COLOR_SERVER_IDLE = "#2980b9"
+_COLOR_SERVER_HOT = "#e74c3c"
 
 
 def _circle(n: int) -> list[tuple[float, float]]:
@@ -59,12 +60,12 @@ def _lerp_hex(t: float, c0: str, c1: str) -> str:
 
 
 def _edge_trace(dev_pos: dict[str, tuple[float, float]]) -> go.Scatter:
-    """Single static trace for all device-to-internet edges."""
+    """Single static trace for all device-to-server edges."""
     x: list = []
     y: list = []
     for dx, dy in dev_pos.values():
-        x += [0.0, dx, None]
-        y += [0.0, dy, None]
+        x += [dx, 0.0, None]
+        y += [dy, 0.0, None]
     return go.Scatter(
         x=x, y=y,
         mode="lines",
@@ -78,10 +79,10 @@ def _label_trace(
     dev_pos: dict[str, tuple[float, float]],
     device_attack_types: dict | None = None,
 ) -> go.Scatter:
-    """Static device-name labels positioned below each node, optionally with attack type."""
+    """Static device-name labels positioned below each node."""
     if device_attack_types:
         labels = [
-            f"{n.replace('_', ' ')}<br>{device_attack_types.get(n, '')}"
+            f"{n.replace('_', ' ')}<br><span style='font-size:9px'>{device_attack_types.get(n, '')}</span>"
             for n in dev_pos
         ]
     else:
@@ -98,9 +99,7 @@ def _label_trace(
     )
 
 
-def _packet_trace(
-    packets: list[dict],
-) -> go.Scatter:
+def _packet_trace(packets: list[dict]) -> go.Scatter:
     """Dynamic trace for in-flight packets."""
     if not packets:
         return go.Scatter(x=[], y=[], mode="markers", showlegend=False, hoverinfo="none",
@@ -135,7 +134,7 @@ def _device_trace(
         for d in dev_pos
     ]
     hover = [
-        f"<b>{d.replace('_',' ')}</b><br>Ataques recibidos: {attack_counts[d]}"
+        f"<b>{d.replace('_',' ')}</b><br>Paquetes de ataque enviados: {attack_counts[d]}"
         for d in dev_pos
     ]
     return go.Scatter(
@@ -149,18 +148,18 @@ def _device_trace(
     )
 
 
-def _internet_trace(under_attack: bool) -> go.Scatter:
-    """Dynamic trace for the central Internet / attacker node."""
-    color = _COLOR_ANOMALY if under_attack else _COLOR_IDLE
+def _server_trace(receiving_attack: bool) -> go.Scatter:
+    """Dynamic trace for the central server node."""
+    color = _COLOR_SERVER_HOT if receiving_attack else _COLOR_SERVER_IDLE
     return go.Scatter(
         x=[0], y=[0],
         mode="markers+text",
         marker=dict(size=52, color=color, symbol="square",
                     line=dict(width=3, color="white")),
-        text=["🌐"],
+        text=["🗄️"],
         textposition="middle center",
         textfont=dict(size=20),
-        hovertext=["<b>Internet / Atacante</b>"],
+        hovertext=["<b>Servidor Central</b>"],
         hoverinfo="text",
         showlegend=False,
     )
@@ -173,21 +172,24 @@ def build_attack_animation(
     window_devs: Sequence[str] | None = None,
     device_attack_types: dict[str, str] | None = None,
 ) -> go.Figure:
-    """Build the animated network attack Plotly figure.
+    """Build the animated IoT network Plotly figure.
+
+    Packets flow FROM each device TOWARD the central server.  Red packets
+    carry anomalous traffic; green packets carry normal traffic.
 
     Parameters
     ----------
     device_names : sequence of str
-        IoT device names to show (4–5 recommended).
+        IoT device names to display on the circle.
     anomaly : np.ndarray
         Binary anomaly labels per inference window (0 = normal, 1 = attack).
     errors : np.ndarray
         Reconstruction MSE per window; used to scale packet size.
     window_devs : sequence of str, optional
-        Per-window device assignment.  When provided overrides the default
-        round-robin assignment so each packet targets the correct device.
+        Per-window device assignment.  When provided each packet is sent by
+        the correct device; otherwise round-robin is used.
     device_attack_types : dict, optional
-        Mapping of device name → attack type label shown under the node.
+        Mapping device name → attack-type label shown under the node.
 
     Returns
     -------
@@ -214,19 +216,19 @@ def build_attack_animation(
     static_labels = _label_trace(dev_pos, device_attack_types=device_attack_types)
 
     def _frame_content(f: int, counts: dict[str, int]) -> tuple:
-        """Compute packet, device, and internet traces for a single animation frame."""
+        """Compute packet, device, and server traces for a single animation frame."""
         packets: list[dict] = []
-        sending_attack = False
+        server_receiving_attack = False
 
         for i in range(n_win):
             if i <= f < i + _PIPELINE:
                 progress = (f - i) / _PIPELINE
-                target = window_dev[i]
-                if target not in dev_pos:
+                source = window_dev[i]
+                if source not in dev_pos:
                     continue
-                dx, dy = dev_pos[target]
-                px = dx * progress
-                py = dy * progress
+                dx, dy = dev_pos[source]
+                px = dx * (1 - progress)
+                py = dy * (1 - progress)
                 is_anom = bool(anomaly[i])
                 norm = float(min(errors[i] / max_err, 1.0))
                 packets.append({
@@ -234,19 +236,19 @@ def build_attack_animation(
                     "color": _COLOR_ANOMALY if is_anom else _COLOR_NORMAL,
                     "size": int(9 + norm * 10),
                 })
-                if is_anom and progress < 0.25:
-                    sending_attack = True
+                if is_anom and progress > 0.75:
+                    server_receiving_attack = True
 
         max_attacks = max(counts.values()) if counts else 1
 
         return (
             _packet_trace(packets),
             _device_trace(dev_pos, counts, max_attacks),
-            _internet_trace(sending_attack),
+            _server_trace(server_receiving_attack),
         )
 
-    p0, d0, i0 = _frame_content(0, {d: 0 for d in device_names})
-    base_data = [static_edges, static_labels, p0, d0, i0]
+    p0, d0, s0 = _frame_content(0, {d: 0 for d in device_names})
+    base_data = [static_edges, static_labels, p0, d0, s0]
 
     frames: list[go.Frame] = []
     running: dict[str, int] = {d: 0 for d in device_names}
@@ -256,9 +258,9 @@ def build_attack_animation(
             if arrival[i] == f and anomaly[i] == 1:
                 running[window_dev[i]] += 1
 
-        pt, dt, it = _frame_content(f, dict(running))
+        pt, dt, st = _frame_content(f, dict(running))
         frames.append(go.Frame(
-            data=[static_edges, static_labels, pt, dt, it],
+            data=[static_edges, static_labels, pt, dt, st],
             name=str(f),
         ))
 
@@ -280,10 +282,10 @@ def build_attack_animation(
                    scaleanchor="x"),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
-        height=500,
+        height=520,
         margin=dict(l=10, r=10, t=50, b=60),
         title=dict(
-            text="Simulación de tráfico — 🔴 Ataque  🟢 Normal",
+            text="Red IoT → Servidor Central — 🔴 Ataque  🟢 Normal",
             font=dict(size=14, color="#2c3e50"),
             x=0.5,
         ),

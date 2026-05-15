@@ -6,8 +6,8 @@ Renders 4-5 IoT device nodes on a circle around a central Internet/attacker
 node.  Inference results drive a stream of coloured packets that travel from
 the attacker toward the devices:
 
-  🔴 Red    — anomaly window (reconstruction error > threshold)
-  🟢 Green  — normal window
+  Red    — anomaly window (reconstruction error > threshold)
+  Green  — normal window
 
 Device nodes accumulate colour from green to red as attack packets arrive,
 giving an immediate visual sense of which devices are under the most pressure.

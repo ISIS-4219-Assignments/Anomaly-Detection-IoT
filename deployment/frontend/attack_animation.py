@@ -74,15 +74,24 @@ def _edge_trace(dev_pos: dict[str, tuple[float, float]]) -> go.Scatter:
     )
 
 
-def _label_trace(dev_pos: dict[str, tuple[float, float]]) -> go.Scatter:
-    """Static device-name labels positioned below each node."""
-    names = [n.replace("_", " ") for n in dev_pos]
+def _label_trace(
+    dev_pos: dict[str, tuple[float, float]],
+    device_attack_types: dict | None = None,
+) -> go.Scatter:
+    """Static device-name labels positioned below each node, optionally with attack type."""
+    if device_attack_types:
+        labels = [
+            f"{n.replace('_', ' ')}<br>{device_attack_types.get(n, '')}"
+            for n in dev_pos
+        ]
+    else:
+        labels = [n.replace("_", " ") for n in dev_pos]
     xs = [pos[0] for pos in dev_pos.values()]
     ys = [pos[1] - 0.38 for pos in dev_pos.values()]
     return go.Scatter(
         x=xs, y=ys,
         mode="text",
-        text=names,
+        text=labels,
         textfont=dict(size=10, color="#2c3e50"),
         hoverinfo="none",
         showlegend=False,
@@ -161,6 +170,8 @@ def build_attack_animation(
     device_names: Sequence[str],
     anomaly: np.ndarray,
     errors: np.ndarray,
+    window_devs: Sequence[str] | None = None,
+    device_attack_types: dict[str, str] | None = None,
 ) -> go.Figure:
     """Build the animated network attack Plotly figure.
 
@@ -172,6 +183,11 @@ def build_attack_animation(
         Binary anomaly labels per inference window (0 = normal, 1 = attack).
     errors : np.ndarray
         Reconstruction MSE per window; used to scale packet size.
+    window_devs : sequence of str, optional
+        Per-window device assignment.  When provided overrides the default
+        round-robin assignment so each packet targets the correct device.
+    device_attack_types : dict, optional
+        Mapping of device name → attack type label shown under the node.
 
     Returns
     -------
@@ -186,22 +202,29 @@ def build_attack_animation(
     errors = np.asarray(errors[:n_win], dtype=float)
     max_err = float(np.max(errors)) if errors.size > 0 else 1.0
 
-    window_dev = [device_names[i % len(device_names)] for i in range(n_win)]
+    if window_devs is not None:
+        window_dev = [str(d) for d in window_devs[:n_win]]
+    else:
+        window_dev = [device_names[i % len(device_names)] for i in range(n_win)]
 
     arrival: dict[int, int] = {i: i + _PIPELINE for i in range(n_win)}
     total_frames = n_win + _PIPELINE
 
     static_edges = _edge_trace(dev_pos)
-    static_labels = _label_trace(dev_pos)
+    static_labels = _label_trace(dev_pos, device_attack_types=device_attack_types)
 
     def _frame_content(f: int, counts: dict[str, int]) -> tuple:
+        """Compute packet, device, and internet traces for a single animation frame."""
         packets: list[dict] = []
         sending_attack = False
 
         for i in range(n_win):
             if i <= f < i + _PIPELINE:
                 progress = (f - i) / _PIPELINE
-                dx, dy = dev_pos[window_dev[i]]
+                target = window_dev[i]
+                if target not in dev_pos:
+                    continue
+                dx, dy = dev_pos[target]
                 px = dx * progress
                 py = dy * progress
                 is_anom = bool(anomaly[i])
